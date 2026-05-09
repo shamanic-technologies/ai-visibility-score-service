@@ -174,7 +174,7 @@ See `src/db/schema.ts` for the full column list. Migrations are auto-applied at 
 
 | Variable | Required | Purpose |
 |----------|----------|---------|
-| `DATABASE_URL` | ✅ | Postgres connection string (Neon recommended) |
+| `AI_VISIBILITY_SCORE_SERVICE_DATABASE_URL` | ✅ | Postgres connection string (Neon recommended) |
 | `INTERNAL_API_KEY` | ✅ | Inbound `x-api-key` value |
 | `CHAT_SERVICE_URL` | ✅ | Base URL for chat-service `/complete` |
 | `CHAT_SERVICE_API_KEY` | ✅ | Outbound key for chat-service |
