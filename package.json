@@ -1,0 +1,43 @@
+{
+  "name": "ai-visibility-score-service",
+  "version": "0.1.0",
+  "description": "Run a brand-audit pipeline against an LLM and compute visibility metrics vs. competitors",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc && npm run generate:openapi",
+    "generate:openapi": "tsx scripts/generate-openapi.ts",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:watch": "vitest",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:push": "drizzle-kit push"
+  },
+  "dependencies": {
+    "@asteasolutions/zod-to-openapi": "^8.4.0",
+    "cors": "^2.8.5",
+    "drizzle-orm": "^0.38.0",
+    "express": "^4.21.0",
+    "p-limit": "^6.2.0",
+    "postgres": "^3.4.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.0.0",
+    "@types/supertest": "^6.0.3",
+    "drizzle-kit": "^0.30.0",
+    "supertest": "^7.2.2",
+    "tsx": "^4.0.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,1088 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "AI Visibility Score Service",
+    "description": "Runs an N-prompt LLM audit per brand to measure brand visibility vs. competitors and persists time-series metrics.",
+    "version": "0.1.0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080"
+    }
+  ],
+  "components": {
+    "schemas": {
+      "HealthResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok"
+            ]
+          },
+          "service": {
+            "type": "string",
+            "enum": [
+              "ai-visibility-score-service"
+            ]
+          }
+        },
+        "required": [
+          "status",
+          "service"
+        ]
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "VisibilityScoreRunResponse": {
+        "type": "object",
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VisibilityScoreRunResult"
+            }
+          }
+        },
+        "required": [
+          "results"
+        ]
+      },
+      "VisibilityScoreRunResult": {
+        "type": "object",
+        "properties": {
+          "run": {
+            "$ref": "#/components/schemas/VisibilityScoreRunRow"
+          },
+          "prompts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PromptDetail"
+            }
+          },
+          "competitors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CompetitorDetail"
+            }
+          },
+          "top_competitors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TopCompetitor"
+            }
+          },
+          "citation_opportunities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CitationOpportunity"
+            }
+          }
+        },
+        "required": [
+          "run",
+          "prompts",
+          "competitors",
+          "top_competitors",
+          "citation_opportunities"
+        ]
+      },
+      "VisibilityScoreRunRow": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "orgId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "brandId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "parentRunId": {
+            "type": "string",
+            "nullable": true,
+            "format": "uuid"
+          },
+          "runId": {
+            "type": "string",
+            "nullable": true,
+            "format": "uuid"
+          },
+          "domain": {
+            "type": "string"
+          },
+          "brandName": {
+            "type": "string"
+          },
+          "llmProvider": {
+            "type": "string"
+          },
+          "llmModel": {
+            "type": "string"
+          },
+          "promptGenModel": {
+            "type": "string"
+          },
+          "extractionProvider": {
+            "type": "string"
+          },
+          "extractionModel": {
+            "type": "string"
+          },
+          "nPrompts": {
+            "type": "number"
+          },
+          "weights": {
+            "$ref": "#/components/schemas/VisibilityWeights"
+          },
+          "visibilityScore": {
+            "type": "string",
+            "nullable": true
+          },
+          "brandMentionRate": {
+            "type": "string",
+            "nullable": true
+          },
+          "shareOfVoice": {
+            "type": "string",
+            "nullable": true
+          },
+          "netSentiment": {
+            "type": "string",
+            "nullable": true
+          },
+          "citationRate": {
+            "type": "string",
+            "nullable": true
+          },
+          "avgPosition": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "completedAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "orgId",
+          "brandId",
+          "parentRunId",
+          "runId",
+          "domain",
+          "brandName",
+          "llmProvider",
+          "llmModel",
+          "promptGenModel",
+          "extractionProvider",
+          "extractionModel",
+          "nPrompts",
+          "weights",
+          "visibilityScore",
+          "brandMentionRate",
+          "shareOfVoice",
+          "netSentiment",
+          "citationRate",
+          "avgPosition",
+          "status",
+          "startedAt",
+          "completedAt",
+          "createdAt"
+        ],
+        "additionalProperties": {
+          "nullable": true
+        }
+      },
+      "VisibilityWeights": {
+        "type": "object",
+        "properties": {
+          "brandMentionRate": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "citationRate": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "positionScore": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "shareOfVoice": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "sentiment": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "brandAndUrlRate": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "required": [
+          "brandMentionRate",
+          "citationRate",
+          "positionScore",
+          "shareOfVoice",
+          "sentiment",
+          "brandAndUrlRate"
+        ]
+      },
+      "PromptDetail": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "promptIndex": {
+            "type": "number"
+          },
+          "promptText": {
+            "type": "string"
+          },
+          "responseText": {
+            "type": "string"
+          },
+          "responseLengthChars": {
+            "type": "number",
+            "nullable": true
+          },
+          "brandFound": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "brandCount": {
+            "type": "number",
+            "nullable": true
+          },
+          "brandPosition": {
+            "type": "number",
+            "nullable": true
+          },
+          "urlFound": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "urlCount": {
+            "type": "number",
+            "nullable": true
+          },
+          "brandAndUrlCoOccurrence": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "maxBrandsInResponse": {
+            "type": "number",
+            "nullable": true
+          },
+          "sentiment": {
+            "type": "string",
+            "nullable": true
+          },
+          "sentimentScore": {
+            "type": "string",
+            "nullable": true
+          },
+          "citationUrls": {
+            "type": "array",
+            "nullable": true,
+            "items": {
+              "type": "string"
+            }
+          },
+          "latencyMs": {
+            "type": "number",
+            "nullable": true
+          },
+          "tokensInput": {
+            "type": "number",
+            "nullable": true
+          },
+          "tokensOutput": {
+            "type": "number",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "promptIndex",
+          "promptText",
+          "responseText",
+          "responseLengthChars",
+          "brandFound",
+          "brandCount",
+          "brandPosition",
+          "urlFound",
+          "urlCount",
+          "brandAndUrlCoOccurrence",
+          "maxBrandsInResponse",
+          "sentiment",
+          "sentimentScore",
+          "citationUrls",
+          "latencyMs",
+          "tokensInput",
+          "tokensOutput"
+        ]
+      },
+      "CompetitorDetail": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "promptIdFk": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "competitorName": {
+            "type": "string"
+          },
+          "competitorUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "position": {
+            "type": "number",
+            "nullable": true
+          },
+          "sentiment": {
+            "type": "string",
+            "nullable": true
+          },
+          "sentimentScore": {
+            "type": "string",
+            "nullable": true
+          },
+          "citationUrl": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "promptIdFk",
+          "competitorName",
+          "competitorUrl",
+          "position",
+          "sentiment",
+          "sentimentScore",
+          "citationUrl"
+        ]
+      },
+      "TopCompetitor": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string",
+            "nullable": true
+          },
+          "mention_count": {
+            "type": "number"
+          },
+          "avg_position": {
+            "type": "number",
+            "nullable": true
+          },
+          "share_of_voice": {
+            "type": "number"
+          },
+          "net_sentiment": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "name",
+          "url",
+          "mention_count",
+          "avg_position",
+          "share_of_voice",
+          "net_sentiment"
+        ]
+      },
+      "CitationOpportunity": {
+        "type": "object",
+        "properties": {
+          "domain": {
+            "type": "string"
+          },
+          "count": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "domain",
+          "count"
+        ]
+      },
+      "ValidationErrorResponse": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "details": {
+            "type": "object",
+            "additionalProperties": {
+              "nullable": true
+            }
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "VisibilityScoreRunRequest": {
+        "type": "object",
+        "properties": {
+          "brandIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "minItems": 1,
+            "maxItems": 10
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "google",
+              "anthropic"
+            ]
+          },
+          "promptModel": {
+            "type": "string",
+            "enum": [
+              "flash",
+              "flash-lite",
+              "pro",
+              "sonnet",
+              "haiku",
+              "opus"
+            ]
+          },
+          "promptGenModel": {
+            "type": "string",
+            "enum": [
+              "flash",
+              "flash-lite",
+              "pro",
+              "sonnet",
+              "haiku",
+              "opus"
+            ]
+          },
+          "extractionProvider": {
+            "type": "string",
+            "enum": [
+              "google",
+              "anthropic"
+            ]
+          },
+          "extractionModel": {
+            "type": "string",
+            "enum": [
+              "flash",
+              "flash-lite",
+              "pro",
+              "sonnet",
+              "haiku",
+              "opus"
+            ]
+          },
+          "nPrompts": {
+            "type": "integer",
+            "minimum": 5,
+            "maximum": 50
+          },
+          "weights": {
+            "$ref": "#/components/schemas/VisibilityWeights"
+          }
+        },
+        "required": [
+          "brandIds"
+        ],
+        "additionalProperties": false
+      },
+      "VisibilityScoreRunListResponse": {
+        "type": "object",
+        "properties": {
+          "runs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VisibilityScoreRunListItem"
+            }
+          },
+          "limit": {
+            "type": "number"
+          },
+          "offset": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "runs",
+          "limit",
+          "offset"
+        ]
+      },
+      "VisibilityScoreRunListItem": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/VisibilityScoreRunRow"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "visibility_score_delta": {
+                "type": "string",
+                "nullable": true
+              },
+              "share_of_voice_delta": {
+                "type": "string",
+                "nullable": true
+              },
+              "net_sentiment_delta": {
+                "type": "string",
+                "nullable": true
+              },
+              "position_delta": {
+                "type": "string",
+                "nullable": true
+              }
+            },
+            "required": [
+              "visibility_score_delta",
+              "share_of_voice_delta",
+              "net_sentiment_delta",
+              "position_delta"
+            ],
+            "additionalProperties": {
+              "nullable": true
+            }
+          }
+        ]
+      }
+    },
+    "parameters": {}
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "Health"
+        ],
+        "summary": "Liveness check",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "tags": [
+          "Docs"
+        ],
+        "summary": "OpenAPI specification",
+        "responses": {
+          "200": {
+            "description": "Spec",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": {
+                    "nullable": true
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Spec not generated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/orgs/visibility-score-runs": {
+      "post": {
+        "tags": [
+          "VisibilityScore"
+        ],
+        "summary": "Run a visibility-score audit for one or more brands",
+        "description": "For each brand ID, runs an N-prompt LLM audit (default 25), extracts structured metrics for the target brand vs. competitors, persists rows, and returns the full bundle.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Service-to-service API key"
+            },
+            "required": true,
+            "description": "Service-to-service API key",
+            "name": "x-api-key",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Internal org UUID"
+            },
+            "required": true,
+            "description": "Internal org UUID",
+            "name": "x-org-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Internal user UUID"
+            },
+            "required": false,
+            "description": "Internal user UUID",
+            "name": "x-user-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Caller's run ID — captured as parentRunId when this service creates its own run"
+            },
+            "required": false,
+            "description": "Caller's run ID — captured as parentRunId when this service creates its own run",
+            "name": "x-run-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated brand UUID(s). Required for /orgs/visibility-score-runs."
+            },
+            "required": false,
+            "description": "Comma-separated brand UUID(s). Required for /orgs/visibility-score-runs.",
+            "name": "x-brand-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "x-campaign-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "x-feature-slug",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "x-workflow-slug",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VisibilityScoreRunRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Run results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VisibilityScoreRunResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Run-tracking dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "VisibilityScore"
+        ],
+        "summary": "List visibility-score runs with deltas",
+        "description": "Returns runs scoped to the requesting org, optionally filtered by brandId/domain/date range. Each row includes a delta block vs. the immediately previous run for the same brand.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": false,
+            "name": "brandId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "domain",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "from",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "to",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "nullable": true,
+              "minimum": 0
+            },
+            "required": false,
+            "name": "offset",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Service-to-service API key"
+            },
+            "required": true,
+            "description": "Service-to-service API key",
+            "name": "x-api-key",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Internal org UUID"
+            },
+            "required": true,
+            "description": "Internal org UUID",
+            "name": "x-org-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Internal user UUID"
+            },
+            "required": false,
+            "description": "Internal user UUID",
+            "name": "x-user-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Caller's run ID — captured as parentRunId when this service creates its own run"
+            },
+            "required": false,
+            "description": "Caller's run ID — captured as parentRunId when this service creates its own run",
+            "name": "x-run-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated brand UUID(s). Required for /orgs/visibility-score-runs."
+            },
+            "required": false,
+            "description": "Comma-separated brand UUID(s). Required for /orgs/visibility-score-runs.",
+            "name": "x-brand-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "x-campaign-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "x-feature-slug",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "x-workflow-slug",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of runs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VisibilityScoreRunListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/orgs/visibility-score-runs/{id}": {
+      "get": {
+        "tags": [
+          "VisibilityScore"
+        ],
+        "summary": "Get a single visibility-score run",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Service-to-service API key"
+            },
+            "required": true,
+            "description": "Service-to-service API key",
+            "name": "x-api-key",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Internal org UUID"
+            },
+            "required": true,
+            "description": "Internal org UUID",
+            "name": "x-org-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Internal user UUID"
+            },
+            "required": false,
+            "description": "Internal user UUID",
+            "name": "x-user-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Caller's run ID — captured as parentRunId when this service creates its own run"
+            },
+            "required": false,
+            "description": "Caller's run ID — captured as parentRunId when this service creates its own run",
+            "name": "x-run-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated brand UUID(s). Required for /orgs/visibility-score-runs."
+            },
+            "required": false,
+            "description": "Comma-separated brand UUID(s). Required for /orgs/visibility-score-runs.",
+            "name": "x-brand-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "x-campaign-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "x-feature-slug",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "x-workflow-slug",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Run bundle",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VisibilityScoreRunResult"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
