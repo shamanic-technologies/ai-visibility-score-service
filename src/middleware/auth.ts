@@ -1,10 +1,10 @@
 import type { Request, Response, NextFunction } from "express";
 
 export function apiKeyAuth(req: Request, res: Response, next: NextFunction) {
-  const expected = process.env.INTERNAL_API_KEY;
+  const expected = process.env.AI_VISIBILITY_SCORE_SERVICE_API_KEY;
   if (!expected) {
     return res.status(500).json({
-      error: "Server misconfigured: INTERNAL_API_KEY not set",
+      error: "Server misconfigured: AI_VISIBILITY_SCORE_SERVICE_API_KEY not set",
     });
   }
   const apiKey = req.headers["x-api-key"];

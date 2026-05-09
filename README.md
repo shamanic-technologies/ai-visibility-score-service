@@ -59,7 +59,7 @@ in the body. Mismatch → `400`.
 
 ```bash
 curl -sS -X POST "$SERVICE_URL/orgs/visibility-score-runs" \
-  -H "x-api-key: $INTERNAL_API_KEY" \
+  -H "x-api-key: $AI_VISIBILITY_SCORE_SERVICE_API_KEY" \
   -H "x-org-id: 11111111-1111-4111-8111-111111111111" \
   -H "x-user-id: 22222222-2222-4222-8222-222222222222" \
   -H "x-run-id: 33333333-3333-4333-8333-333333333333" \
@@ -175,7 +175,7 @@ See `src/db/schema.ts` for the full column list. Migrations are auto-applied at 
 | Variable | Required | Purpose |
 |----------|----------|---------|
 | `AI_VISIBILITY_SCORE_SERVICE_DATABASE_URL` | ✅ | Postgres connection string (Neon recommended) |
-| `INTERNAL_API_KEY` | ✅ | Inbound `x-api-key` value |
+| `AI_VISIBILITY_SCORE_SERVICE_API_KEY` | ✅ | Inbound `x-api-key` value |
 | `CHAT_SERVICE_URL` | ✅ | Base URL for chat-service `/complete` |
 | `CHAT_SERVICE_API_KEY` | ✅ | Outbound key for chat-service |
 | `BRAND_SERVICE_URL` | ✅ | Base URL for brand-service |

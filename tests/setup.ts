@@ -1,7 +1,7 @@
 process.env.NODE_ENV = "test";
 process.env.AI_VISIBILITY_SCORE_SERVICE_DATABASE_URL =
   process.env.AI_VISIBILITY_SCORE_SERVICE_DATABASE_URL ?? "postgresql://localhost/test";
-process.env.INTERNAL_API_KEY = process.env.INTERNAL_API_KEY ?? "test-internal-key";
+process.env.AI_VISIBILITY_SCORE_SERVICE_API_KEY = process.env.AI_VISIBILITY_SCORE_SERVICE_API_KEY ?? "test-internal-key";
 process.env.CHAT_SERVICE_URL = process.env.CHAT_SERVICE_URL ?? "https://chat.test.local";
 process.env.CHAT_SERVICE_API_KEY = process.env.CHAT_SERVICE_API_KEY ?? "test-chat-key";
 process.env.BRAND_SERVICE_URL = process.env.BRAND_SERVICE_URL ?? "https://brand.test.local";

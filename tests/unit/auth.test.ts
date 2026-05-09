@@ -14,7 +14,7 @@ function mocks(headers: Record<string, string> = {}) {
 
 describe("apiKeyAuth", () => {
   it("401 when x-api-key missing", () => {
-    process.env.INTERNAL_API_KEY = "k";
+    process.env.AI_VISIBILITY_SCORE_SERVICE_API_KEY = "k";
     const { req, res, next } = mocks();
     apiKeyAuth(req, res, next);
     expect(res.status).toHaveBeenCalledWith(401);
@@ -22,14 +22,14 @@ describe("apiKeyAuth", () => {
   });
 
   it("403 when x-api-key wrong", () => {
-    process.env.INTERNAL_API_KEY = "right";
+    process.env.AI_VISIBILITY_SCORE_SERVICE_API_KEY = "right";
     const { req, res, next } = mocks({ "x-api-key": "wrong" });
     apiKeyAuth(req, res, next);
     expect(res.status).toHaveBeenCalledWith(403);
   });
 
   it("calls next when key matches", () => {
-    process.env.INTERNAL_API_KEY = "k";
+    process.env.AI_VISIBILITY_SCORE_SERVICE_API_KEY = "k";
     const { req, res, next } = mocks({ "x-api-key": "k" });
     apiKeyAuth(req, res, next);
     expect(next).toHaveBeenCalled();
