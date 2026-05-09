@@ -11,7 +11,7 @@ import { postRuns, listRuns, getRun } from "./handlers/runs.js";
 
 const REQUIRED_ENV = [
   "AI_VISIBILITY_SCORE_SERVICE_DATABASE_URL",
-  "INTERNAL_API_KEY",
+  "AI_VISIBILITY_SCORE_SERVICE_API_KEY",
   "CHAT_SERVICE_URL",
   "CHAT_SERVICE_API_KEY",
   "BRAND_SERVICE_URL",
