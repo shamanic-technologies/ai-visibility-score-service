@@ -3,7 +3,7 @@ import { assertEnv } from "../../src/index.js";
 
 describe("assertEnv", () => {
   const FULL = {
-    DATABASE_URL: "postgres://x",
+    AI_VISIBILITY_SCORE_SERVICE_DATABASE_URL: "postgres://x",
     INTERNAL_API_KEY: "k",
     CHAT_SERVICE_URL: "u",
     CHAT_SERVICE_API_KEY: "k",
@@ -24,6 +24,8 @@ describe("assertEnv", () => {
   });
 
   it("throws listing all missing vars", () => {
-    expect(() => assertEnv({} as NodeJS.ProcessEnv)).toThrow(/DATABASE_URL.*INTERNAL_API_KEY/);
+    expect(() => assertEnv({} as NodeJS.ProcessEnv)).toThrow(
+      /AI_VISIBILITY_SCORE_SERVICE_DATABASE_URL.*INTERNAL_API_KEY/,
+    );
   });
 });

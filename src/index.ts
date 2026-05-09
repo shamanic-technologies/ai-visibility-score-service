@@ -10,7 +10,7 @@ import { withRunTracking } from "./middleware/run-tracking.js";
 import { postRuns, listRuns, getRun } from "./handlers/runs.js";
 
 const REQUIRED_ENV = [
-  "DATABASE_URL",
+  "AI_VISIBILITY_SCORE_SERVICE_DATABASE_URL",
   "INTERNAL_API_KEY",
   "CHAT_SERVICE_URL",
   "CHAT_SERVICE_API_KEY",
