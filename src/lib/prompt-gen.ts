@@ -1,4 +1,5 @@
 import { chatComplete, type ChatModel, type ChatTrackingHeaders } from "./chat-client.js";
+import { safeParseJson } from "./safe-parse-json.js";
 
 export interface BrandContext {
   industry?: string;
@@ -48,7 +49,7 @@ Return JSON with exactly ${n} prompts.`;
     opts.tracking,
   );
 
-  const json = result.json ?? safeParseJson(result.content);
+  const json = result.json ?? safeParseJson(result.content, "prompt-gen");
   const prompts = (json as { prompts?: unknown }).prompts;
   if (!Array.isArray(prompts)) {
     throw new Error(`[prompt-gen] expected JSON { prompts: string[] }, got: ${result.content.slice(0, 200)}`);
@@ -60,12 +61,3 @@ Return JSON with exactly ${n} prompts.`;
   return cleaned.slice(0, n);
 }
 
-function safeParseJson(content: string): unknown {
-  try {
-    return JSON.parse(content);
-  } catch {
-    const match = content.match(/\{[\s\S]*\}/);
-    if (!match) throw new Error(`[prompt-gen] response not JSON: ${content.slice(0, 200)}`);
-    return JSON.parse(match[0]);
-  }
-}

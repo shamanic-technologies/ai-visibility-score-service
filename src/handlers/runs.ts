@@ -215,7 +215,6 @@ export async function getRun(req: Request, res: Response): Promise<void> {
       ),
     );
 
-  const promptIdByIndex = new Map(promptRows.map((p) => [p.promptIndex, p.id]));
   const extracted = promptRows
     .slice()
     .sort((a, b) => a.promptIndex - b.promptIndex)

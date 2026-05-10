@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { chatComplete, type ChatModel, type ChatProvider, type ChatTrackingHeaders } from "./chat-client.js";
+import { safeParseJson } from "./safe-parse-json.js";
 
 const SentimentEnum = z.enum(["positive", "neutral", "negative"]);
 
@@ -89,16 +90,7 @@ ${params.responseText}
     params.tracking,
   );
 
-  const raw = result.json ?? safeParseJson(result.content);
+  const raw = result.json ?? safeParseJson(result.content, "extractor");
   return ExtractionResultSchema.parse(raw);
 }
 
-function safeParseJson(content: string): unknown {
-  try {
-    return JSON.parse(content);
-  } catch {
-    const match = content.match(/\{[\s\S]*\}/);
-    if (!match) throw new Error(`[extractor] response not JSON: ${content.slice(0, 200)}`);
-    return JSON.parse(match[0]);
-  }
-}

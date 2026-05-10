@@ -71,30 +71,3 @@ export async function extractBrandFields(
   return (await res.json()) as BrandFieldResult;
 }
 
-export async function getBrand(
-  brandId: string,
-  tracking: Omit<BrandTrackingHeaders, "brandId">,
-): Promise<{ id: string; name: string; domain: string; url: string }> {
-  const apiKey = process.env.BRAND_SERVICE_API_KEY;
-  if (!apiKey) throw new Error("[ai-visibility-score-service] BRAND_SERVICE_API_KEY is required");
-
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    "x-api-key": apiKey,
-    "x-org-id": tracking.orgId,
-    "x-run-id": tracking.runId,
-  };
-  if (tracking.userId) headers["x-user-id"] = tracking.userId;
-
-  const res = await fetch(`${baseUrl()}/internal/brands/${brandId}`, {
-    method: "GET",
-    headers,
-  });
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`[brand-client] GET /internal/brands/${brandId} returned ${res.status}: ${text}`);
-  }
-
-  return (await res.json()) as { id: string; name: string; domain: string; url: string };
-}
