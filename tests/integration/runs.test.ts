@@ -20,8 +20,6 @@ vi.mock("../../src/lib/run.js", () => ({
 vi.mock("../../src/lib/runs-client.js", () => ({
   createRun: vi.fn(),
   updateRunStatus: vi.fn(),
-  addRunCosts: vi.fn(),
-  finalizeProvisionedCosts: vi.fn(),
 }));
 
 import { createApp } from "../../src/index.js";

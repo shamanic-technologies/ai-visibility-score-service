@@ -42,12 +42,6 @@ describe("runs-client", () => {
     expect(JSON.parse(call[1].body)).toEqual({ status: "completed" });
   });
 
-  it("addRunCosts skips empty arrays", async () => {
-    const { addRunCosts } = await import("../../src/lib/runs-client.js");
-    await addRunCosts("run-x", [], identity);
-    expect(fetch).not.toHaveBeenCalled();
-  });
-
   it("throws on non-2xx", async () => {
     (fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: false,
