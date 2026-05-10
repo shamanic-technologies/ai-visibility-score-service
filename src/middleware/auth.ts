@@ -1,6 +1,8 @@
 import type { Request, Response, NextFunction } from "express";
 import crypto from "node:crypto";
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export function apiKeyAuth(req: Request, res: Response, next: NextFunction) {
   const expected = process.env.AI_VISIBILITY_SCORE_SERVICE_API_KEY;
   if (!expected) {
@@ -26,6 +28,9 @@ export function requireOrgId(req: Request, res: Response, next: NextFunction) {
   if (!orgId || typeof orgId !== "string") {
     return res.status(400).json({ error: "x-org-id header is required" });
   }
+  if (!UUID_RE.test(orgId)) {
+    return res.status(400).json({ error: "x-org-id must be a valid UUID" });
+  }
 
   const userId = req.headers["x-user-id"];
   const parentRunId = req.headers["x-run-id"];
@@ -35,17 +40,21 @@ export function requireOrgId(req: Request, res: Response, next: NextFunction) {
   const workflowSlug = req.headers["x-workflow-slug"];
 
   req.orgId = orgId;
-  if (typeof userId === "string") req.userId = userId;
-  if (typeof parentRunId === "string") req.parentRunId = parentRunId;
-  if (typeof campaignId === "string") req.campaignId = campaignId;
+  if (typeof userId === "string" && UUID_RE.test(userId)) req.userId = userId;
+  if (typeof parentRunId === "string" && UUID_RE.test(parentRunId)) req.parentRunId = parentRunId;
+  if (typeof campaignId === "string" && UUID_RE.test(campaignId)) req.campaignId = campaignId;
   if (typeof featureSlug === "string") req.featureSlug = featureSlug;
   if (typeof workflowSlug === "string") req.workflowSlug = workflowSlug;
   if (typeof brandIdHeader === "string") {
     req.brandIdHeader = brandIdHeader;
-    req.brandIds = brandIdHeader
+    const validBrandIds = brandIdHeader
       .split(",")
       .map((s) => s.trim())
-      .filter(Boolean);
+      .filter((s) => UUID_RE.test(s));
+    if (validBrandIds.length === 0) {
+      return res.status(400).json({ error: "x-brand-id must contain at least one valid UUID" });
+    }
+    req.brandIds = validBrandIds;
   }
 
   return next();
