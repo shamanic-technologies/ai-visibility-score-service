@@ -230,4 +230,19 @@ describe("edge cases", () => {
     const m = aggregate([p({})], "acme.com", DEFAULT_WEIGHTS);
     expect(m.citation_share_of_voice).toBe(0);
   });
+
+  it("redistributes positionScore weight when position_score is null (brand found, position unknown)", () => {
+    // Brand found but brandPosition always null → position_score is null
+    const ps = [
+      p({ brandFound: true, brandCount: 1, brandPosition: null, maxBrandsInResponse: 3, sentiment: "positive", sentimentScore: 0.5 }),
+    ];
+    const m = aggregate(ps, "acme.com", DEFAULT_WEIGHTS);
+    expect(m.position_score).toBeNull();
+    // Without redistribution, score would lose 20% of potential
+    // With redistribution, the 0.20 weight is spread to other components
+    // brand_mention_rate = 1.0, other metrics compute normally
+    // Score should be higher than if positionScore weight was wasted at 0
+    const wastedScore = 100 * (0.25 * 1.0 + 0.15 * 0 + 0.20 * 0 + 0.20 * 1.0 + 0.15 * 1.0 + 0.05 * 0);
+    expect(m.visibility_score).toBeGreaterThan(wastedScore);
+  });
 });
