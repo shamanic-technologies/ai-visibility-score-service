@@ -181,12 +181,18 @@ export async function listRuns(req: Request, res: Response): Promise<void> {
   });
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export async function getRun(req: Request, res: Response): Promise<void> {
   if (!req.orgId) {
     res.status(500).json({ error: "Auth middleware did not run" });
     return;
   }
   const { id } = req.params;
+  if (!UUID_RE.test(id)) {
+    res.status(400).json({ error: "Invalid run id format" });
+    return;
+  }
 
   const [run] = await db
     .select()
