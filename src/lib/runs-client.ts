@@ -16,17 +16,6 @@ export interface RunIdentity {
   parentRunId?: string;
 }
 
-export interface CostItem {
-  costName: string;
-  quantity: number;
-  costSource: "platform" | "org";
-}
-
-export interface ProvisionedCostItem extends CostItem {
-  /** "actual" finalizes; "cancelled" releases the provisioned reservation. */
-  finalState: "actual" | "cancelled";
-}
-
 export interface ForwardHeaders {
   campaignId?: string;
   featureSlug?: string;
@@ -100,28 +89,3 @@ export async function updateRunStatus(
   return runsRequest<RunsRun>("PATCH", `/v1/runs/${id}`, identity, { status }, forward);
 }
 
-export async function addRunCosts(
-  id: string,
-  items: CostItem[],
-  identity: RunIdentity,
-  forward?: ForwardHeaders,
-): Promise<void> {
-  if (items.length === 0) return;
-  await runsRequest("POST", `/v1/runs/${id}/costs`, identity, { items }, forward);
-}
-
-export async function finalizeProvisionedCosts(
-  id: string,
-  items: ProvisionedCostItem[],
-  identity: RunIdentity,
-  forward?: ForwardHeaders,
-): Promise<void> {
-  if (items.length === 0) return;
-  await runsRequest(
-    "POST",
-    `/v1/runs/${id}/costs/finalize`,
-    identity,
-    { items },
-    forward,
-  );
-}
