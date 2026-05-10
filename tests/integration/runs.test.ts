@@ -278,7 +278,89 @@ describe("happy path POST /orgs/visibility-score-runs", () => {
   });
 });
 
-describe("GET /orgs/visibility-score-runs/:id org isolation", () => {
+describe("GET /orgs/visibility-score-runs (list)", () => {
+  it("returns runs list with pagination", async () => {
+    const now = new Date();
+    const mockRow = {
+      r: {
+        id: BRAND_ID_1,
+        orgId: ORG_ID,
+        brandId: BRAND_ID_1,
+        parentRunId: PARENT_RUN,
+        runId: SVC_RUN,
+        domain: "acme.com",
+        brandName: "Acme",
+        llmProvider: "google",
+        llmModel: "pro",
+        promptGenModel: "flash",
+        extractionProvider: "anthropic",
+        extractionModel: "haiku",
+        nPrompts: 25,
+        weights: {
+          brandMentionRate: 0.25,
+          citationRate: 0.15,
+          positionScore: 0.2,
+          shareOfVoice: 0.2,
+          sentiment: 0.15,
+          brandAndUrlRate: 0.05,
+        },
+        brandMentionCount: 10,
+        brandMentionRate: "0.4000",
+        urlMentionCount: 5,
+        urlMentionRate: "0.2000",
+        brandAndUrlCount: 5,
+        brandAndUrlRate: "0.2000",
+        avgPosition: "1.50",
+        positionScore: "0.7500",
+        shareOfVoice: "0.3500",
+        weightedShareOfVoice: "0.4000",
+        citationCount: 5,
+        citationRate: "0.2000",
+        citationShareOfVoice: "0.2500",
+        positiveCount: 7,
+        neutralCount: 2,
+        negativeCount: 1,
+        netSentiment: "0.6000",
+        avgSentimentScore: "0.5000",
+        avgResponseLength: 300,
+        responseLengthWhenBrandFound: 320,
+        responseLengthWhenBrandNotFound: 280,
+        distinctCompetitorsCount: 12,
+        visibilityScore: "47.50",
+        status: "completed" as const,
+        error: null,
+        startedAt: now,
+        completedAt: now,
+        createdAt: now,
+      },
+      visibility_score_delta: "0.05",
+      share_of_voice_delta: null,
+      net_sentiment_delta: "0.1",
+      position_delta: null,
+    };
+
+    const offset = vi.fn().mockResolvedValue([mockRow]);
+    const limitFn = vi.fn(() => ({ offset }));
+    const orderBy = vi.fn(() => ({ limit: limitFn }));
+    const where = vi.fn(() => ({ orderBy }));
+    const from = vi.fn(() => ({ where }));
+    vi.mocked(db.select).mockReturnValue({ from } as any);
+
+    const res = await request(createApp())
+      .get("/orgs/visibility-score-runs")
+      .set(authHeaders({ "x-brand-id": BRAND_ID_1 }));
+
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty("runs");
+    expect(res.body).toHaveProperty("limit");
+    expect(res.body).toHaveProperty("offset");
+    expect(res.body.runs).toHaveLength(1);
+    expect(res.body.runs[0].brandId).toBe(BRAND_ID_1);
+    expect(res.body.runs[0].visibility_score_delta).toBe("0.05");
+  });
+});
+
+describe("GET /orgs/visibility-score-runs/:id", () => {
   it("returns 404 when run belongs to another org", async () => {
     const where = vi.fn().mockResolvedValue([]); // no row matches org filter
     const from = vi.fn(() => ({ where }));
@@ -289,5 +371,124 @@ describe("GET /orgs/visibility-score-runs/:id org isolation", () => {
       .set(authHeaders({ "x-brand-id": BRAND_ID_1 }));
 
     expect(res.status).toBe(404);
+  });
+
+  it("returns run detail with prompts and competitors", async () => {
+    const now = new Date();
+    const RUN_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const PROMPT_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+
+    const fakeRun = {
+      id: RUN_ID,
+      orgId: ORG_ID,
+      brandId: BRAND_ID_1,
+      parentRunId: PARENT_RUN,
+      runId: SVC_RUN,
+      domain: "acme.com",
+      brandName: "Acme",
+      llmProvider: "google",
+      llmModel: "pro",
+      promptGenModel: "flash",
+      extractionProvider: "anthropic",
+      extractionModel: "haiku",
+      nPrompts: 1,
+      weights: {
+        brandMentionRate: 0.25,
+        citationRate: 0.15,
+        positionScore: 0.2,
+        shareOfVoice: 0.2,
+        sentiment: 0.15,
+        brandAndUrlRate: 0.05,
+      },
+      brandMentionCount: 1,
+      brandMentionRate: "1.0000",
+      urlMentionCount: 0,
+      urlMentionRate: "0.0000",
+      brandAndUrlCount: 0,
+      brandAndUrlRate: "0.0000",
+      avgPosition: "1.00",
+      positionScore: "1.0000",
+      shareOfVoice: "1.0000",
+      weightedShareOfVoice: "1.0000",
+      citationCount: 0,
+      citationRate: "0.0000",
+      citationShareOfVoice: "0.0000",
+      positiveCount: 1,
+      neutralCount: 0,
+      negativeCount: 0,
+      netSentiment: "1.0000",
+      avgSentimentScore: "0.8000",
+      avgResponseLength: 200,
+      responseLengthWhenBrandFound: 200,
+      responseLengthWhenBrandNotFound: null,
+      distinctCompetitorsCount: 0,
+      visibilityScore: "80.00",
+      status: "completed" as const,
+      error: null,
+      startedAt: now,
+      completedAt: now,
+      createdAt: now,
+    };
+
+    const fakePrompt = {
+      id: PROMPT_ID,
+      runIdFk: RUN_ID,
+      orgId: ORG_ID,
+      promptIndex: 0,
+      promptText: "What is Acme?",
+      responseText: "Acme is a great company.",
+      responseLengthChars: 24,
+      brandFound: true,
+      brandCount: 1,
+      brandPosition: 1,
+      urlFound: false,
+      urlCount: 0,
+      brandAndUrlCoOccurrence: false,
+      maxBrandsInResponse: 1,
+      sentiment: "positive",
+      sentimentScore: "0.8000",
+      citationUrls: [],
+      latencyMs: 500,
+      tokensInput: 50,
+      tokensOutput: 30,
+      createdAt: now,
+    };
+
+    // The handler calls db.select() three times sequentially:
+    // 1. run lookup, 2. prompts, 3. competitors
+    let callCount = 0;
+    vi.mocked(db.select).mockImplementation(() => {
+      callCount++;
+      if (callCount === 1) {
+        // run query: select().from().where()
+        const where = vi.fn().mockResolvedValue([fakeRun]);
+        const from = vi.fn(() => ({ where }));
+        return { from } as any;
+      } else if (callCount === 2) {
+        // prompts query: select().from().where()
+        const where = vi.fn().mockResolvedValue([fakePrompt]);
+        const from = vi.fn(() => ({ where }));
+        return { from } as any;
+      } else {
+        // competitors query: select().from().where()
+        const where = vi.fn().mockResolvedValue([]);
+        const from = vi.fn(() => ({ where }));
+        return { from } as any;
+      }
+    });
+
+    const res = await request(createApp())
+      .get(`/orgs/visibility-score-runs/${RUN_ID}`)
+      .set(authHeaders({ "x-brand-id": BRAND_ID_1 }));
+
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty("run");
+    expect(res.body).toHaveProperty("prompts");
+    expect(res.body).toHaveProperty("competitors");
+    expect(res.body).toHaveProperty("top_competitors");
+    expect(res.body).toHaveProperty("citation_opportunities");
+    expect(res.body.run.id).toBe(RUN_ID);
+    expect(res.body.prompts).toHaveLength(1);
+    expect(res.body.prompts[0].promptText).toBe("What is Acme?");
   });
 });
