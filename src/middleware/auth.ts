@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction } from "express";
+import crypto from "node:crypto";
 
 export function apiKeyAuth(req: Request, res: Response, next: NextFunction) {
   const expected = process.env.AI_VISIBILITY_SCORE_SERVICE_API_KEY;
@@ -11,7 +12,10 @@ export function apiKeyAuth(req: Request, res: Response, next: NextFunction) {
   if (!apiKey || typeof apiKey !== "string") {
     return res.status(401).json({ error: "Missing x-api-key header" });
   }
-  if (apiKey !== expected) {
+  if (apiKey.length !== expected.length) {
+    return res.status(403).json({ error: "Invalid API key" });
+  }
+  if (!crypto.timingSafeEqual(Buffer.from(apiKey), Buffer.from(expected))) {
     return res.status(403).json({ error: "Invalid API key" });
   }
   return next();
