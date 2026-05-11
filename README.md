@@ -32,29 +32,22 @@ DB query on those routes filters by `org_id`.
 
 ### POST /orgs/visibility-score-runs
 
+Request body MUST be empty (`{}`). The brand to audit comes from the `x-brand-id` header.
+
 ```jsonc
-{
-  "brandIds": ["<uuid>"],                     // required, exactly 1 (co-branding not supported)
-  "provider": "google",                       // optional, default "google"
-  "promptModel": "pro",                       // optional, default "pro" (audit model)
-  "promptGenModel": "flash",                  // optional, default "flash" (prompt generator)
-  "extractionProvider": "anthropic",          // optional, default "anthropic"
-  "extractionModel": "haiku",                 // optional, default "haiku"
-  "nPrompts": 25,                             // optional, default 25, range 5–50
-  "weights": {                                // optional, default below
-    "brandMentionRate": 0.25,
-    "citationRate": 0.15,
-    "positionScore": 0.20,
-    "shareOfVoice": 0.20,
-    "sentiment": 0.15,
-    "brandAndUrlRate": 0.05
-  }
-}
+{}
 ```
 
-`x-brand-id` header MUST contain exactly one UUID matching `brandIds[0]` in the body.
-Multi-brand (comma-separated) headers and multi-element `brandIds` are rejected with `400`
-(co-branding not supported).
+All LLM provider/model choices, prompt count, and scoring weights are decided server-side
+from `src/lib/config.ts` (`VISIBILITY_RUN_CONFIG`). They are NOT caller-configurable — to
+change them, ship a new version of the service. This keeps callers oblivious to LLM-ops
+concerns and prevents provider/model mismatch errors at the chat-service boundary.
+
+Required headers:
+- `x-api-key`
+- `x-org-id` (UUID)
+- `x-brand-id` (UUID — single brand, no comma-separated list; co-branding not supported)
+- `x-run-id` (UUID — caller's parent run ID, captured as `parentRunId`)
 
 ### Curl example
 
@@ -66,7 +59,7 @@ curl -sS -X POST "$SERVICE_URL/orgs/visibility-score-runs" \
   -H "x-run-id: 33333333-3333-4333-8333-333333333333" \
   -H "x-brand-id: 44444444-4444-4444-8444-444444444444" \
   -H "Content-Type: application/json" \
-  -d '{"brandIds":["44444444-4444-4444-8444-444444444444"], "nPrompts": 25}' | jq .
+  -d '{}' | jq .
 ```
 
 ## Metric formulas
@@ -214,11 +207,13 @@ npm run dev           # tsx watch on PORT (default 8080)
 - **502 from POST /orgs/visibility-score-runs** — `runs-service` is unreachable. Verify
   `RUNS_SERVICE_URL` + `RUNS_SERVICE_API_KEY`. The service intentionally fails loud
   rather than silently dropping run tracking.
-- **400 "x-brand-id header must match brandIds in body"** — header and body disagree on
-  the single brand id.
-- **400 "co-branding not supported"** — caller passed more than one brand id (either via
-  comma-separated `x-brand-id` header or via multi-element `brandIds` array). Issue one
-  run per brand.
+- **400 "x-brand-id header is required"** — POST without the `x-brand-id` header.
+- **400 "x-brand-id header must be a valid UUID"** — header is present but malformed.
+- **400 "x-brand-id header must contain exactly one brand id (co-branding not supported)"** —
+  caller passed a comma-separated list. Issue one run per brand instead.
+- **400 "Invalid request"** — request body is not strictly `{}`. The body schema is
+  closed; any field is rejected. All run configuration is server-side and not
+  caller-configurable.
 - **404 on GET /orgs/visibility-score-runs/{id}** — the run does not exist OR belongs
   to a different `x-org-id`. The service returns 404 for both to avoid leaking tenant
   metadata.
