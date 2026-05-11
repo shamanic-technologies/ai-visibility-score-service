@@ -156,8 +156,11 @@ the successful results plus a 200; total failure returns 500.
 
 Three tables, all with `org_id` for tenant isolation:
 
-- `visibility_score_runs` — one row per (brand × audit). Holds all aggregate metrics
-  plus status / timing.
+- `visibility_score_runs` — one row per (brand × audit attempt). Holds all aggregate
+  metrics plus status / timing. Successful runs have `status='completed'` with all
+  metrics populated; failed runs have `status='failed'` with `error` set and metric
+  columns null (`domain` and `brand_name` may also be null if the pipeline failed
+  before brand-service resolved).
 - `visibility_score_prompts` — `nPrompts` rows per run. Per-prompt response + extraction.
 - `visibility_score_competitors` — one row per competitor mention per prompt.
 

@@ -226,15 +226,36 @@ export function aggregate(
     .slice(0, 10);
 
   const sentimentNormalized = (net_sentiment + 1) / 2;
-  const positionScoreForFormula = position_score ?? 0;
+
+  // If position_score is null, redistribute its weight proportionally
+  const effectiveWeights = { ...weights };
+  if (position_score === null) {
+    const redistributed = weights.positionScore;
+    const remaining =
+      weights.brandMentionRate +
+      weights.citationRate +
+      weights.shareOfVoice +
+      weights.sentiment +
+      weights.brandAndUrlRate;
+    if (remaining > 0) {
+      const scale = (remaining + redistributed) / remaining;
+      effectiveWeights.brandMentionRate *= scale;
+      effectiveWeights.citationRate *= scale;
+      effectiveWeights.shareOfVoice *= scale;
+      effectiveWeights.sentiment *= scale;
+      effectiveWeights.brandAndUrlRate *= scale;
+    }
+    effectiveWeights.positionScore = 0;
+  }
+
   const raw =
     100 *
-    (weights.brandMentionRate * brand_mention_rate +
-      weights.citationRate * citation_rate +
-      weights.positionScore * positionScoreForFormula +
-      weights.shareOfVoice * share_of_voice +
-      weights.sentiment * sentimentNormalized +
-      weights.brandAndUrlRate * brand_and_url_rate);
+    (effectiveWeights.brandMentionRate * brand_mention_rate +
+      effectiveWeights.citationRate * citation_rate +
+      effectiveWeights.positionScore * (position_score ?? 0) +
+      effectiveWeights.shareOfVoice * share_of_voice +
+      effectiveWeights.sentiment * sentimentNormalized +
+      effectiveWeights.brandAndUrlRate * brand_and_url_rate);
   const visibility_score = Math.max(0, Math.min(100, raw));
 
   return {

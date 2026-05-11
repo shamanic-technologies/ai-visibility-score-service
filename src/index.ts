@@ -32,6 +32,9 @@ export function assertEnv(env: NodeJS.ProcessEnv = process.env): void {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const openapiPath = join(__dirname, "..", "openapi.json");
+const openapiSpec = existsSync(openapiPath)
+  ? JSON.parse(readFileSync(openapiPath, "utf-8"))
+  : null;
 
 export function createApp() {
   const app = express();
@@ -43,12 +46,12 @@ export function createApp() {
   });
 
   app.get("/openapi.json", (_req, res) => {
-    if (!existsSync(openapiPath)) {
+    if (!openapiSpec) {
       return res.status(404).json({
         error: "OpenAPI spec not generated. Run: npm run generate:openapi",
       });
     }
-    res.json(JSON.parse(readFileSync(openapiPath, "utf-8")));
+    res.json(openapiSpec);
   });
 
   app.post(

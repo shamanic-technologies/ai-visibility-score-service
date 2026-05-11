@@ -8,6 +8,13 @@
       "when": 1778322603208,
       "tag": "0000_initial_visibility_score_schema",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1778503062378,
+      "tag": "0001_nullable_domain_brandname",
+      "breakpoints": true
     }
   ]
 }
