@@ -33,7 +33,7 @@ describe("generatePrompts", () => {
     const out = await generatePrompts(
       { industry: "saas", target_audience: "founders", offerings: "crm", geography: "us" },
       5,
-      { model: "flash", tracking },
+      { provider: "google", model: "flash", tracking },
     );
 
     expect(out).toEqual(prompts);
@@ -54,7 +54,9 @@ describe("generatePrompts", () => {
     });
 
     const { generatePrompts } = await import("../../src/lib/prompt-gen.js");
-    await expect(generatePrompts({}, 5, { model: "flash", tracking })).rejects.toThrow(/returned 2/);
+    await expect(
+      generatePrompts({}, 5, { provider: "google", model: "flash", tracking }),
+    ).rejects.toThrow(/returned 2/);
   });
 
   it("recovers from JSON wrapped in prose", async () => {
@@ -72,7 +74,31 @@ describe("generatePrompts", () => {
     });
 
     const { generatePrompts } = await import("../../src/lib/prompt-gen.js");
-    const out = await generatePrompts({}, 3, { model: "flash", tracking });
+    const out = await generatePrompts({}, 3, { provider: "google", model: "flash", tracking });
     expect(out).toEqual(prompts);
+  });
+
+  it("forwards `provider` to chat-service (anthropic + sonnet does not get routed to google)", async () => {
+    const prompts = ["a"];
+    const fetchMock = fetch as ReturnType<typeof vi.fn>;
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          content: JSON.stringify({ prompts }),
+          json: { prompts },
+          tokensInput: 1,
+          tokensOutput: 1,
+          model: "sonnet-1",
+        }),
+    });
+
+    const { generatePrompts } = await import("../../src/lib/prompt-gen.js");
+    await generatePrompts({}, 1, { provider: "anthropic", model: "sonnet", tracking });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body);
+    expect(body.provider).toBe("anthropic");
+    expect(body.model).toBe("sonnet");
   });
 });

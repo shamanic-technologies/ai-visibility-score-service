@@ -1,4 +1,4 @@
-import { chatComplete, type ChatModel, type ChatTrackingHeaders } from "./chat-client.js";
+import { chatComplete, type ChatModel, type ChatProvider, type ChatTrackingHeaders } from "./chat-client.js";
 import { safeParseJson } from "./safe-parse-json.js";
 
 export interface BrandContext {
@@ -23,6 +23,7 @@ export async function generatePrompts(
   context: BrandContext,
   n: number,
   opts: {
+    provider: ChatProvider;
     model: ChatModel;
     tracking: ChatTrackingHeaders;
   },
@@ -41,7 +42,7 @@ Return JSON with exactly ${n} prompts.`;
     {
       message,
       systemPrompt: SYSTEM_PROMPT,
-      provider: "google",
+      provider: opts.provider,
       model: opts.model,
       responseFormat: "json",
       temperature: 0.7,

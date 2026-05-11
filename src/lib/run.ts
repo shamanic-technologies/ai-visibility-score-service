@@ -32,6 +32,7 @@ export interface RunOptions {
 
   provider: ChatProvider;
   promptModel: ChatModel;
+  promptGenProvider: ChatProvider;
   promptGenModel: ChatModel;
   extractionProvider: ChatProvider;
   extractionModel: ChatModel;
@@ -113,6 +114,7 @@ export async function runVisibilityScore(opts: RunOptions): Promise<RunResult> {
   };
 
   const prompts = await generatePrompts(ctx, opts.nPrompts, {
+    provider: opts.promptGenProvider,
     model: opts.promptGenModel,
     tracking: baseTracking,
   });

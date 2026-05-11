@@ -80,53 +80,53 @@ describe("auth + validation on POST /orgs/visibility-score-runs", () => {
   it("401 without x-api-key", async () => {
     const res = await request(createApp())
       .post("/orgs/visibility-score-runs")
-      .send({ brandIds: [BRAND_ID_1] });
+      .send({});
     expect(res.status).toBe(401);
   });
 
   it("403 with wrong x-api-key", async () => {
     const res = await request(createApp())
       .post("/orgs/visibility-score-runs")
-      .set({ ...authHeaders(), "x-api-key": "wrong" })
-      .send({ brandIds: [BRAND_ID_1] });
+      .set({ ...authHeaders({ "x-brand-id": BRAND_ID_1 }), "x-api-key": "wrong" })
+      .send({});
     expect(res.status).toBe(403);
   });
 
   it("400 without x-org-id", async () => {
-    const h = authHeaders();
+    const h = authHeaders({ "x-brand-id": BRAND_ID_1 });
     delete (h as Record<string, string>)["x-org-id"];
     const res = await request(createApp())
       .post("/orgs/visibility-score-runs")
       .set(h)
-      .send({ brandIds: [BRAND_ID_1] });
-    expect(res.status).toBe(400);
-  });
-
-  it("400 when brandIds missing in body", async () => {
-    const res = await request(createApp())
-      .post("/orgs/visibility-score-runs")
-      .set(authHeaders({ "x-brand-id": BRAND_ID_1 }))
       .send({});
     expect(res.status).toBe(400);
-    expect(res.body.error).toBe("Invalid request");
   });
 
-  it("400 when x-brand-id missing while body has brandIds", async () => {
+  it("400 when x-brand-id missing", async () => {
     const res = await request(createApp())
       .post("/orgs/visibility-score-runs")
       .set(authHeaders())
-      .send({ brandIds: [BRAND_ID_1] });
+      .send({});
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/x-brand-id/);
   });
 
-  it("400 when x-brand-id does NOT match body brandIds", async () => {
+  it("400 when x-brand-id is not a valid UUID", async () => {
     const res = await request(createApp())
       .post("/orgs/visibility-score-runs")
-      .set(authHeaders({ "x-brand-id": "00000000-0000-0000-0000-000000000999" }))
-      .send({ brandIds: [BRAND_ID_1] });
+      .set(authHeaders({ "x-brand-id": "not-a-uuid" }))
+      .send({});
     expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/match/);
+    expect(res.body.error).toMatch(/UUID/);
+  });
+
+  it("400 when body contains any field (strict)", async () => {
+    const res = await request(createApp())
+      .post("/orgs/visibility-score-runs")
+      .set(authHeaders({ "x-brand-id": BRAND_ID_1 }))
+      .send({ nPrompts: 10 });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("Invalid request");
   });
 
   it("502 when runs-service unavailable", async () => {
@@ -134,7 +134,7 @@ describe("auth + validation on POST /orgs/visibility-score-runs", () => {
     const res = await request(createApp())
       .post("/orgs/visibility-score-runs")
       .set(authHeaders({ "x-brand-id": BRAND_ID_1 }))
-      .send({ brandIds: [BRAND_ID_1] });
+      .send({});
     expect(res.status).toBe(502);
   });
 });
@@ -225,33 +225,41 @@ describe("happy path POST /orgs/visibility-score-runs", () => {
     };
   }
 
-  it("returns one result for one brand", async () => {
+  it("returns one result for one brand with empty body", async () => {
     vi.mocked(runVisibilityScore).mockResolvedValueOnce(fakeResult(BRAND_ID_1) as any);
     const res = await request(createApp())
       .post("/orgs/visibility-score-runs")
       .set(authHeaders({ "x-brand-id": BRAND_ID_1 }))
-      .send({ brandIds: [BRAND_ID_1] });
+      .send({});
     expect(res.status).toBe(200);
     expect(res.body.results).toHaveLength(1);
     expect(res.body.results[0].run.brandId).toBe(BRAND_ID_1);
     expect(res.body.results[0].citation_opportunities[0].domain).toBe("competitor.com");
   });
 
-  it("rejects multi-brand body with 400 (co-branding not supported)", async () => {
-    const res = await request(createApp())
+  it("calls runVisibilityScore with server-side config values", async () => {
+    vi.mocked(runVisibilityScore).mockResolvedValueOnce(fakeResult(BRAND_ID_1) as any);
+    await request(createApp())
       .post("/orgs/visibility-score-runs")
-      .set(authHeaders({ "x-brand-id": `${BRAND_ID_1},${BRAND_ID_2}` }))
-      .send({ brandIds: [BRAND_ID_1, BRAND_ID_2] });
+      .set(authHeaders({ "x-brand-id": BRAND_ID_1 }))
+      .send({});
 
-    expect(res.status).toBe(400);
-    expect(vi.mocked(runVisibilityScore)).not.toHaveBeenCalled();
+    const callArg = vi.mocked(runVisibilityScore).mock.calls[0][0];
+    expect(callArg.provider).toBe("google");
+    expect(callArg.promptModel).toBe("pro");
+    expect(callArg.promptGenProvider).toBe("google");
+    expect(callArg.promptGenModel).toBe("flash");
+    expect(callArg.extractionProvider).toBe("anthropic");
+    expect(callArg.extractionModel).toBe("haiku");
+    expect(callArg.nPrompts).toBe(25);
+    expect(callArg.brandId).toBe(BRAND_ID_1);
   });
 
-  it("rejects multi-brand x-brand-id header with 400 even if body has 1 id", async () => {
+  it("rejects multi-brand x-brand-id header with 400", async () => {
     const res = await request(createApp())
       .post("/orgs/visibility-score-runs")
       .set(authHeaders({ "x-brand-id": `${BRAND_ID_1},${BRAND_ID_2}` }))
-      .send({ brandIds: [BRAND_ID_1] });
+      .send({});
 
     expect(res.status).toBe(400);
     expect(vi.mocked(runVisibilityScore)).not.toHaveBeenCalled();
@@ -262,7 +270,7 @@ describe("happy path POST /orgs/visibility-score-runs", () => {
     await request(createApp())
       .post("/orgs/visibility-score-runs")
       .set(authHeaders({ "x-brand-id": BRAND_ID_1 }))
-      .send({ brandIds: [BRAND_ID_1] });
+      .send({});
 
     expect(vi.mocked(createRun)).toHaveBeenCalledWith(
       "visibility-score-run",
@@ -275,12 +283,12 @@ describe("happy path POST /orgs/visibility-score-runs", () => {
     expect(callArg.parentRunId).toBe(PARENT_RUN);
   });
 
-  it("returns 500 if all brand runs fail", async () => {
+  it("returns 500 if the brand run fails", async () => {
     vi.mocked(runVisibilityScore).mockRejectedValue(new Error("brand-service down"));
     const res = await request(createApp())
       .post("/orgs/visibility-score-runs")
       .set(authHeaders({ "x-brand-id": BRAND_ID_1 }))
-      .send({ brandIds: [BRAND_ID_1] });
+      .send({});
     expect(res.status).toBe(500);
   });
 });
