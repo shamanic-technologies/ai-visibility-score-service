@@ -34,7 +34,7 @@ DB query on those routes filters by `org_id`.
 
 ```jsonc
 {
-  "brandIds": ["<uuid>", "<uuid>"],          // required, 1–10
+  "brandIds": ["<uuid>"],                     // required, exactly 1 (co-branding not supported)
   "provider": "google",                       // optional, default "google"
   "promptModel": "pro",                       // optional, default "pro" (audit model)
   "promptGenModel": "flash",                  // optional, default "flash" (prompt generator)
@@ -52,8 +52,9 @@ DB query on those routes filters by `org_id`.
 }
 ```
 
-`x-brand-id` header MUST contain the same set of UUIDs (comma-separated) as `brandIds`
-in the body. Mismatch → `400`.
+`x-brand-id` header MUST contain exactly one UUID matching `brandIds[0]` in the body.
+Multi-brand (comma-separated) headers and multi-element `brandIds` are rejected with `400`
+(co-branding not supported).
 
 ### Curl example
 
@@ -213,9 +214,11 @@ npm run dev           # tsx watch on PORT (default 8080)
 - **502 from POST /orgs/visibility-score-runs** — `runs-service` is unreachable. Verify
   `RUNS_SERVICE_URL` + `RUNS_SERVICE_API_KEY`. The service intentionally fails loud
   rather than silently dropping run tracking.
-- **400 "x-brand-id header must match brandIds"** — caller passed brand IDs in the body
-  that don't match the comma-separated `x-brand-id` header. Both must contain the same
-  set of UUIDs.
+- **400 "x-brand-id header must match brandIds in body"** — header and body disagree on
+  the single brand id.
+- **400 "co-branding not supported"** — caller passed more than one brand id (either via
+  comma-separated `x-brand-id` header or via multi-element `brandIds` array). Issue one
+  run per brand.
 - **404 on GET /orgs/visibility-score-runs/{id}** — the run does not exist OR belongs
   to a different `x-org-id`. The service returns 404 for both to avoid leaking tenant
   metadata.

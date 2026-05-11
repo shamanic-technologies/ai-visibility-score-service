@@ -479,7 +479,7 @@
               "format": "uuid"
             },
             "minItems": 1,
-            "maxItems": 10
+            "maxItems": 1
           },
           "provider": {
             "type": "string",

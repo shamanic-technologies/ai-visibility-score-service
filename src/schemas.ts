@@ -69,7 +69,7 @@ export const ChatModelSchema = z.enum(["flash", "flash-lite", "pro", "sonnet", "
 
 export const RunRequestSchema = z
   .object({
-    brandIds: z.array(z.string().uuid()).min(1).max(10),
+    brandIds: z.array(z.string().uuid()).min(1).max(1),
     provider: ChatProviderSchema.optional(),
     promptModel: ChatModelSchema.optional(),
     promptGenModel: ChatModelSchema.optional(),

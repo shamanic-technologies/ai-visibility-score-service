@@ -27,15 +27,20 @@ export async function postRuns(req: Request, res: Response): Promise<void> {
     res.status(400).json({ error: "x-brand-id header is required" });
     return;
   }
-  const sortedHeader = [...headerBrandIds].sort().join(",");
-  const sortedBody = [...parsed.data.brandIds].sort().join(",");
-  if (sortedHeader !== sortedBody) {
+  if (headerBrandIds.length !== 1) {
     res
       .status(400)
-      .json({ error: "x-brand-id header must match brandIds in body (same set, any order)" });
+      .json({ error: "x-brand-id header must contain exactly one brand id (co-branding not supported)" });
+    return;
+  }
+  if (headerBrandIds[0] !== parsed.data.brandIds[0]) {
+    res
+      .status(400)
+      .json({ error: "x-brand-id header must match brandIds in body" });
     return;
   }
 
+  const brandId = parsed.data.brandIds[0];
   const provider = parsed.data.provider ?? "google";
   const promptModel = parsed.data.promptModel ?? "pro";
   const promptGenModel = parsed.data.promptGenModel ?? "flash";
@@ -45,58 +50,39 @@ export async function postRuns(req: Request, res: Response): Promise<void> {
   const weights = parsed.data.weights ?? DEFAULT_WEIGHTS;
 
   console.log(
-    `[ai-visibility-score-service] starting run org=${req.orgId} brands=[${parsed.data.brandIds.join(",")}] n=${nPrompts}`,
+    `[ai-visibility-score-service] starting run org=${req.orgId} brand=${brandId} n=${nPrompts}`,
   );
 
-  const settled = await Promise.allSettled(
-    parsed.data.brandIds.map((brandId) =>
-      runVisibilityScore({
-        brandId,
-        orgId: req.orgId!,
-        userId: req.userId,
-        runId: req.runId!,
-        parentRunId: req.parentRunId,
-        campaignId: req.campaignId,
-        featureSlug: req.featureSlug,
-        workflowSlug: req.workflowSlug,
-        provider,
-        promptModel,
-        promptGenModel,
-        extractionProvider,
-        extractionModel,
-        nPrompts,
-        weights,
-      }),
-    ),
-  );
-
-  const failures = settled
-    .map((s, i) => ({ s, brandId: parsed.data.brandIds[i] }))
-    .filter((x) => x.s.status === "rejected");
-
-  if (failures.length === parsed.data.brandIds.length) {
-    const firstErr = (failures[0].s as PromiseRejectedResult).reason;
-    console.error(
-      `[ai-visibility-score-service] all brand runs failed`,
-      firstErr,
-    );
+  let r;
+  try {
+    r = await runVisibilityScore({
+      brandId,
+      orgId: req.orgId,
+      userId: req.userId,
+      runId: req.runId,
+      parentRunId: req.parentRunId,
+      campaignId: req.campaignId,
+      featureSlug: req.featureSlug,
+      workflowSlug: req.workflowSlug,
+      provider,
+      promptModel,
+      promptGenModel,
+      extractionProvider,
+      extractionModel,
+      nPrompts,
+      weights,
+    });
+  } catch (err) {
+    console.error(`[ai-visibility-score-service] brand run failed for ${brandId}:`, err);
     res.status(500).json({
-      error: "All brand runs failed",
-      details: { message: firstErr instanceof Error ? firstErr.message : String(firstErr) },
+      error: "Brand run failed",
+      details: { message: err instanceof Error ? err.message : String(err) },
     });
     return;
   }
 
-  if (failures.length > 0) {
-    console.warn(
-      `[ai-visibility-score-service] partial failure: ${failures.length}/${parsed.data.brandIds.length} brands failed`,
-    );
-  }
-
-  const results = settled.flatMap((s) => {
-    if (s.status !== "fulfilled") return [];
-    const r = s.value;
-    return [
+  res.json({
+    results: [
       {
         run: serializeRun(r.run),
         prompts: r.prompts.map(serializePrompt),
@@ -104,10 +90,8 @@ export async function postRuns(req: Request, res: Response): Promise<void> {
         top_competitors: r.metrics.top_competitors,
         citation_opportunities: r.metrics.citation_opportunities,
       },
-    ];
+    ],
   });
-
-  res.json({ results });
 }
 
 export async function listRuns(req: Request, res: Response): Promise<void> {
