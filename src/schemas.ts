@@ -5,19 +5,38 @@ extendZodWithOpenApi(z);
 
 export const registry = new OpenAPIRegistry();
 
-const orgScopedHeaders = {
+const orgScopedHeadersBase = {
   "x-api-key": z.string().openapi({ description: "Service-to-service API key" }),
   "x-org-id": z.string().uuid().openapi({ description: "Internal org UUID" }),
   "x-user-id": z.string().optional().openapi({ description: "Internal user UUID" }),
   "x-run-id": z.string().uuid().optional().openapi({
     description: "Caller's run ID — captured as parentRunId when this service creates its own run",
   }),
-  "x-brand-id": z.string().optional().openapi({
-    description: "Comma-separated brand UUID(s). Required for /orgs/visibility-score-runs.",
+  "x-campaign-id": z.string().uuid().optional().openapi({
+    description: "Optional caller campaign UUID, forwarded to downstream chat-service / brand-service for tracking.",
   }),
-  "x-campaign-id": z.string().optional(),
-  "x-feature-slug": z.string().optional(),
-  "x-workflow-slug": z.string().optional(),
+  "x-feature-slug": z.string().optional().openapi({
+    description: "Optional caller feature slug, forwarded to downstream services for tracking.",
+  }),
+  "x-workflow-slug": z.string().optional().openapi({
+    description: "Optional caller workflow slug, forwarded to downstream services for tracking.",
+  }),
+};
+
+const orgScopedHeadersOptionalBrand = {
+  ...orgScopedHeadersBase,
+  "x-brand-id": z.string().uuid().optional().openapi({
+    description:
+      "Optional brand UUID filter. Ignored by GET /orgs/visibility-score-runs (use the `brandId` query param to filter). Single UUID — no comma-separated list.",
+  }),
+};
+
+const orgScopedHeadersRequiredBrand = {
+  ...orgScopedHeadersBase,
+  "x-brand-id": z.string().uuid().openapi({
+    description:
+      "Single brand UUID to audit. Required. Co-branding is not supported — exactly one UUID, no comma-separated list.",
+  }),
 };
 
 export const ErrorResponseSchema = z
@@ -68,18 +87,12 @@ export const ChatProviderSchema = z.enum(["google", "anthropic"]);
 export const ChatModelSchema = z.enum(["flash", "flash-lite", "pro", "sonnet", "haiku", "opus"]);
 
 export const RunRequestSchema = z
-  .object({
-    brandIds: z.array(z.string().uuid()).min(1).max(1),
-    provider: ChatProviderSchema.optional(),
-    promptModel: ChatModelSchema.optional(),
-    promptGenModel: ChatModelSchema.optional(),
-    extractionProvider: ChatProviderSchema.optional(),
-    extractionModel: ChatModelSchema.optional(),
-    nPrompts: z.number().int().min(5).max(50).optional(),
-    weights: VisibilityWeightsSchema.optional(),
-  })
+  .object({})
   .strict()
-  .openapi("VisibilityScoreRunRequest");
+  .openapi("VisibilityScoreRunRequest", {
+    description:
+      "Empty body. The brand to audit is specified via the `x-brand-id` header. All LLM provider/model choices, prompt count, and scoring weights are decided server-side from a canonical config and are not caller-configurable.",
+  });
 
 export type RunRequest = z.infer<typeof RunRequestSchema>;
 
@@ -182,12 +195,12 @@ registry.registerPath({
   method: "post",
   path: "/orgs/visibility-score-runs",
   tags: ["VisibilityScore"],
-  summary: "Run a visibility-score audit for one or more brands",
+  summary: "Run a visibility-score audit for a single brand",
   description:
-    "For each brand ID, runs an N-prompt LLM audit (default 25), extracts structured metrics for the target brand vs. competitors, persists rows, and returns the full bundle.",
+    "Runs an N-prompt LLM audit against the brand identified by `x-brand-id`, extracts structured metrics for the target brand vs. competitors, persists rows, and returns the full bundle.\n\nThe request body MUST be empty (`{}`). All LLM provider/model choices, prompt count, and scoring weights are decided server-side from a canonical config and cannot be overridden by the caller — to change them, ship a new version of the service.",
   request: {
-    headers: z.object(orgScopedHeaders),
-    body: { content: { "application/json": { schema: RunRequestSchema } } },
+    headers: z.object(orgScopedHeadersRequiredBrand),
+    body: { content: { "application/json": { schema: RunRequestSchema, example: {} } } },
   },
   responses: {
     200: { description: "Run results", content: { "application/json": { schema: RunResponseSchema } } },
@@ -226,7 +239,7 @@ registry.registerPath({
   description:
     "Returns runs scoped to the requesting org, optionally filtered by brandId/domain/date range. Each row includes a delta block vs. the immediately previous run for the same brand.",
   request: {
-    headers: z.object(orgScopedHeaders),
+    headers: z.object(orgScopedHeadersOptionalBrand),
     query: RunListQuerySchema,
   },
   responses: {
@@ -241,7 +254,7 @@ registry.registerPath({
   tags: ["VisibilityScore"],
   summary: "Get a single visibility-score run",
   request: {
-    headers: z.object(orgScopedHeaders),
+    headers: z.object(orgScopedHeadersOptionalBrand),
     params: z.object({ id: z.string().uuid() }),
   },
   responses: {

@@ -471,76 +471,9 @@
       },
       "VisibilityScoreRunRequest": {
         "type": "object",
-        "properties": {
-          "brandIds": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "minItems": 1,
-            "maxItems": 1
-          },
-          "provider": {
-            "type": "string",
-            "enum": [
-              "google",
-              "anthropic"
-            ]
-          },
-          "promptModel": {
-            "type": "string",
-            "enum": [
-              "flash",
-              "flash-lite",
-              "pro",
-              "sonnet",
-              "haiku",
-              "opus"
-            ]
-          },
-          "promptGenModel": {
-            "type": "string",
-            "enum": [
-              "flash",
-              "flash-lite",
-              "pro",
-              "sonnet",
-              "haiku",
-              "opus"
-            ]
-          },
-          "extractionProvider": {
-            "type": "string",
-            "enum": [
-              "google",
-              "anthropic"
-            ]
-          },
-          "extractionModel": {
-            "type": "string",
-            "enum": [
-              "flash",
-              "flash-lite",
-              "pro",
-              "sonnet",
-              "haiku",
-              "opus"
-            ]
-          },
-          "nPrompts": {
-            "type": "integer",
-            "minimum": 5,
-            "maximum": 50
-          },
-          "weights": {
-            "$ref": "#/components/schemas/VisibilityWeights"
-          }
-        },
-        "required": [
-          "brandIds"
-        ],
-        "additionalProperties": false
+        "properties": {},
+        "additionalProperties": false,
+        "description": "Empty body. The brand to audit is specified via the `x-brand-id` header. All LLM provider/model choices, prompt count, and scoring weights are decided server-side from a canonical config and are not caller-configurable."
       },
       "VisibilityScoreRunListResponse": {
         "type": "object",
@@ -664,8 +597,8 @@
         "tags": [
           "VisibilityScore"
         ],
-        "summary": "Run a visibility-score audit for one or more brands",
-        "description": "For each brand ID, runs an N-prompt LLM audit (default 25), extracts structured metrics for the target brand vs. competitors, persists rows, and returns the full bundle.",
+        "summary": "Run a visibility-score audit for a single brand",
+        "description": "Runs an N-prompt LLM audit against the brand identified by `x-brand-id`, extracts structured metrics for the target brand vs. competitors, persists rows, and returns the full bundle.\n\nThe request body MUST be empty (`{}`). All LLM provider/model choices, prompt count, and scoring weights are decided server-side from a canonical config and cannot be overridden by the caller — to change them, ship a new version of the service.",
         "parameters": [
           {
             "schema": {
@@ -712,35 +645,43 @@
           {
             "schema": {
               "type": "string",
-              "description": "Comma-separated brand UUID(s). Required for /orgs/visibility-score-runs."
+              "format": "uuid",
+              "description": "Optional caller campaign UUID, forwarded to downstream chat-service / brand-service for tracking."
             },
             "required": false,
-            "description": "Comma-separated brand UUID(s). Required for /orgs/visibility-score-runs.",
-            "name": "x-brand-id",
-            "in": "header"
-          },
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": false,
+            "description": "Optional caller campaign UUID, forwarded to downstream chat-service / brand-service for tracking.",
             "name": "x-campaign-id",
             "in": "header"
           },
           {
             "schema": {
-              "type": "string"
+              "type": "string",
+              "description": "Optional caller feature slug, forwarded to downstream services for tracking."
             },
             "required": false,
+            "description": "Optional caller feature slug, forwarded to downstream services for tracking.",
             "name": "x-feature-slug",
             "in": "header"
           },
           {
             "schema": {
-              "type": "string"
+              "type": "string",
+              "description": "Optional caller workflow slug, forwarded to downstream services for tracking."
             },
             "required": false,
+            "description": "Optional caller workflow slug, forwarded to downstream services for tracking.",
             "name": "x-workflow-slug",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Single brand UUID to audit. Required. Co-branding is not supported — exactly one UUID, no comma-separated list."
+            },
+            "required": true,
+            "description": "Single brand UUID to audit. Required. Co-branding is not supported — exactly one UUID, no comma-separated list.",
+            "name": "x-brand-id",
             "in": "header"
           }
         ],
@@ -749,7 +690,8 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/VisibilityScoreRunRequest"
-              }
+              },
+              "example": {}
             }
           }
         },
@@ -911,35 +853,43 @@
           {
             "schema": {
               "type": "string",
-              "description": "Comma-separated brand UUID(s). Required for /orgs/visibility-score-runs."
+              "format": "uuid",
+              "description": "Optional caller campaign UUID, forwarded to downstream chat-service / brand-service for tracking."
             },
             "required": false,
-            "description": "Comma-separated brand UUID(s). Required for /orgs/visibility-score-runs.",
-            "name": "x-brand-id",
-            "in": "header"
-          },
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": false,
+            "description": "Optional caller campaign UUID, forwarded to downstream chat-service / brand-service for tracking.",
             "name": "x-campaign-id",
             "in": "header"
           },
           {
             "schema": {
-              "type": "string"
+              "type": "string",
+              "description": "Optional caller feature slug, forwarded to downstream services for tracking."
             },
             "required": false,
+            "description": "Optional caller feature slug, forwarded to downstream services for tracking.",
             "name": "x-feature-slug",
             "in": "header"
           },
           {
             "schema": {
-              "type": "string"
+              "type": "string",
+              "description": "Optional caller workflow slug, forwarded to downstream services for tracking."
             },
             "required": false,
+            "description": "Optional caller workflow slug, forwarded to downstream services for tracking.",
             "name": "x-workflow-slug",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Optional brand UUID filter. Ignored by GET /orgs/visibility-score-runs (use the `brandId` query param to filter). Single UUID — no comma-separated list."
+            },
+            "required": false,
+            "description": "Optional brand UUID filter. Ignored by GET /orgs/visibility-score-runs (use the `brandId` query param to filter). Single UUID — no comma-separated list.",
+            "name": "x-brand-id",
             "in": "header"
           }
         ],
@@ -1028,35 +978,43 @@
           {
             "schema": {
               "type": "string",
-              "description": "Comma-separated brand UUID(s). Required for /orgs/visibility-score-runs."
+              "format": "uuid",
+              "description": "Optional caller campaign UUID, forwarded to downstream chat-service / brand-service for tracking."
             },
             "required": false,
-            "description": "Comma-separated brand UUID(s). Required for /orgs/visibility-score-runs.",
-            "name": "x-brand-id",
-            "in": "header"
-          },
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": false,
+            "description": "Optional caller campaign UUID, forwarded to downstream chat-service / brand-service for tracking.",
             "name": "x-campaign-id",
             "in": "header"
           },
           {
             "schema": {
-              "type": "string"
+              "type": "string",
+              "description": "Optional caller feature slug, forwarded to downstream services for tracking."
             },
             "required": false,
+            "description": "Optional caller feature slug, forwarded to downstream services for tracking.",
             "name": "x-feature-slug",
             "in": "header"
           },
           {
             "schema": {
-              "type": "string"
+              "type": "string",
+              "description": "Optional caller workflow slug, forwarded to downstream services for tracking."
             },
             "required": false,
+            "description": "Optional caller workflow slug, forwarded to downstream services for tracking.",
             "name": "x-workflow-slug",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Optional brand UUID filter. Ignored by GET /orgs/visibility-score-runs (use the `brandId` query param to filter). Single UUID — no comma-separated list."
+            },
+            "required": false,
+            "description": "Optional brand UUID filter. Ignored by GET /orgs/visibility-score-runs (use the `brandId` query param to filter). Single UUID — no comma-separated list.",
+            "name": "x-brand-id",
             "in": "header"
           }
         ],

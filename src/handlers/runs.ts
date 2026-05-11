@@ -7,8 +7,11 @@ import {
   visibilityScoreCompetitors,
 } from "../db/schema.js";
 import { runVisibilityScore } from "../lib/run.js";
-import { DEFAULT_WEIGHTS, aggregate } from "../lib/metrics.js";
+import { aggregate } from "../lib/metrics.js";
+import { VISIBILITY_RUN_CONFIG } from "../lib/config.js";
 import { RunRequestSchema, RunListQuerySchema } from "../schemas.js";
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function postRuns(req: Request, res: Response): Promise<void> {
   if (!req.orgId || !req.runId) {
@@ -33,24 +36,14 @@ export async function postRuns(req: Request, res: Response): Promise<void> {
       .json({ error: "x-brand-id header must contain exactly one brand id (co-branding not supported)" });
     return;
   }
-  if (headerBrandIds[0] !== parsed.data.brandIds[0]) {
-    res
-      .status(400)
-      .json({ error: "x-brand-id header must match brandIds in body" });
+  const brandId = headerBrandIds[0];
+  if (!UUID_RE.test(brandId)) {
+    res.status(400).json({ error: "x-brand-id header must be a valid UUID" });
     return;
   }
 
-  const brandId = parsed.data.brandIds[0];
-  const provider = parsed.data.provider ?? "google";
-  const promptModel = parsed.data.promptModel ?? "pro";
-  const promptGenModel = parsed.data.promptGenModel ?? "flash";
-  const extractionProvider = parsed.data.extractionProvider ?? "anthropic";
-  const extractionModel = parsed.data.extractionModel ?? "haiku";
-  const nPrompts = parsed.data.nPrompts ?? 25;
-  const weights = parsed.data.weights ?? DEFAULT_WEIGHTS;
-
   console.log(
-    `[ai-visibility-score-service] starting run org=${req.orgId} brand=${brandId} n=${nPrompts}`,
+    `[ai-visibility-score-service] starting run org=${req.orgId} brand=${brandId} n=${VISIBILITY_RUN_CONFIG.nPrompts}`,
   );
 
   let r;
@@ -64,13 +57,14 @@ export async function postRuns(req: Request, res: Response): Promise<void> {
       campaignId: req.campaignId,
       featureSlug: req.featureSlug,
       workflowSlug: req.workflowSlug,
-      provider,
-      promptModel,
-      promptGenModel,
-      extractionProvider,
-      extractionModel,
-      nPrompts,
-      weights,
+      provider: VISIBILITY_RUN_CONFIG.provider,
+      promptModel: VISIBILITY_RUN_CONFIG.promptModel,
+      promptGenProvider: VISIBILITY_RUN_CONFIG.promptGenProvider,
+      promptGenModel: VISIBILITY_RUN_CONFIG.promptGenModel,
+      extractionProvider: VISIBILITY_RUN_CONFIG.extractionProvider,
+      extractionModel: VISIBILITY_RUN_CONFIG.extractionModel,
+      nPrompts: VISIBILITY_RUN_CONFIG.nPrompts,
+      weights: VISIBILITY_RUN_CONFIG.weights,
     });
   } catch (err) {
     console.error(`[ai-visibility-score-service] brand run failed for ${brandId}:`, err);
@@ -164,8 +158,6 @@ export async function listRuns(req: Request, res: Response): Promise<void> {
     offset,
   });
 }
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function getRun(req: Request, res: Response): Promise<void> {
   if (!req.orgId) {
