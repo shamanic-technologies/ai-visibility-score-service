@@ -237,19 +237,24 @@ describe("happy path POST /orgs/visibility-score-runs", () => {
     expect(res.body.results[0].citation_opportunities[0].domain).toBe("competitor.com");
   });
 
-  it("runs N brands in parallel and returns N results", async () => {
-    vi.mocked(runVisibilityScore)
-      .mockResolvedValueOnce(fakeResult(BRAND_ID_1) as any)
-      .mockResolvedValueOnce(fakeResult(BRAND_ID_2) as any);
-
+  it("rejects multi-brand body with 400 (co-branding not supported)", async () => {
     const res = await request(createApp())
       .post("/orgs/visibility-score-runs")
       .set(authHeaders({ "x-brand-id": `${BRAND_ID_1},${BRAND_ID_2}` }))
       .send({ brandIds: [BRAND_ID_1, BRAND_ID_2] });
 
-    expect(res.status).toBe(200);
-    expect(res.body.results).toHaveLength(2);
-    expect(vi.mocked(runVisibilityScore)).toHaveBeenCalledTimes(2);
+    expect(res.status).toBe(400);
+    expect(vi.mocked(runVisibilityScore)).not.toHaveBeenCalled();
+  });
+
+  it("rejects multi-brand x-brand-id header with 400 even if body has 1 id", async () => {
+    const res = await request(createApp())
+      .post("/orgs/visibility-score-runs")
+      .set(authHeaders({ "x-brand-id": `${BRAND_ID_1},${BRAND_ID_2}` }))
+      .send({ brandIds: [BRAND_ID_1] });
+
+    expect(res.status).toBe(400);
+    expect(vi.mocked(runVisibilityScore)).not.toHaveBeenCalled();
   });
 
   it("forwards parentRunId from inbound x-run-id and uses own runId in createRun call", async () => {

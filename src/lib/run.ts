@@ -86,26 +86,30 @@ export async function runVisibilityScore(opts: RunOptions): Promise<RunResult> {
     },
   );
 
-  const brandName =
-    asString(brandResp.brand?.name) ??
-    asString(brandResp.fields["name"]) ??
-    asString((brandResp.fields["brand"] as { name?: unknown } | undefined)?.name) ??
-    "(unknown brand)";
-  const domain =
-    asString(brandResp.brand?.domain) ??
-    asString(brandResp.fields["domain"]) ??
-    "";
-  if (!domain) {
+  if (brandResp.brands.length !== 1) {
+    throw new Error(
+      `[ai-visibility-score-service] brand-service returned ${brandResp.brands.length} brands, expected 1 (brandId=${opts.brandId})`,
+    );
+  }
+  const brand = brandResp.brands[0];
+  if (brand.brandId !== opts.brandId) {
+    throw new Error(
+      `[ai-visibility-score-service] brand-service returned brandId=${brand.brandId}, expected ${opts.brandId}`,
+    );
+  }
+  if (!brand.domain) {
     throw new Error(
       `[ai-visibility-score-service] brand ${opts.brandId} has no domain — cannot run visibility audit`,
     );
   }
+  const brandName = asString(brand.name) ?? "(unknown brand)";
+  const domain = brand.domain;
 
   const ctx: BrandContext = {
-    industry: asString(brandResp.fields["industry"]),
-    target_audience: asString(brandResp.fields["target_audience"]),
-    offerings: asString(brandResp.fields["offerings"]),
-    geography: asString(brandResp.fields["geography"]),
+    industry: asString(brandResp.fields["industry"]?.value),
+    target_audience: asString(brandResp.fields["target_audience"]?.value),
+    offerings: asString(brandResp.fields["offerings"]?.value),
+    geography: asString(brandResp.fields["geography"]?.value),
   };
 
   const prompts = await generatePrompts(ctx, opts.nPrompts, {

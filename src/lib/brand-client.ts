@@ -3,16 +3,21 @@ export interface BrandFieldRequest {
   description: string;
 }
 
-export interface BrandFieldResult {
+export interface BrandSummary {
   brandId: string;
-  /** May be a flat record (single-brand) or a per-brand object — we always pass single brand. */
-  fields: Record<string, unknown>;
-  brand?: {
-    id?: string;
-    name?: string;
-    domain?: string;
-    url?: string;
-  };
+  domain: string;
+  name: string | null;
+  brandUrl?: string | null;
+}
+
+export interface BrandFieldValue {
+  value: unknown;
+  byBrand?: Record<string, { value: unknown }>;
+}
+
+export interface BrandFieldResult {
+  brands: BrandSummary[];
+  fields: Record<string, BrandFieldValue>;
 }
 
 export interface BrandTrackingHeaders {
@@ -70,4 +75,3 @@ export async function extractBrandFields(
 
   return (await res.json()) as BrandFieldResult;
 }
-
