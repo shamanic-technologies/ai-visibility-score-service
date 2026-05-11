@@ -58,7 +58,60 @@ function dec(v: number | null): string | null {
 
 export async function runVisibilityScore(opts: RunOptions): Promise<RunResult> {
   const startedAt = new Date();
+  let domain: string | null = null;
+  let brandName: string | null = null;
 
+  try {
+    return await runVisibilityScoreInner(opts, startedAt, (d, n) => {
+      domain = d;
+      brandName = n;
+    });
+  } catch (err) {
+    await persistFailedRun(opts, startedAt, domain, brandName, err);
+    throw err;
+  }
+}
+
+async function persistFailedRun(
+  opts: RunOptions,
+  startedAt: Date,
+  domain: string | null,
+  brandName: string | null,
+  err: unknown,
+): Promise<void> {
+  try {
+    await db.insert(visibilityScoreRuns).values({
+      orgId: opts.orgId,
+      brandId: opts.brandId,
+      parentRunId: opts.parentRunId ?? null,
+      runId: opts.runId,
+      domain,
+      brandName,
+      llmProvider: opts.provider,
+      llmModel: opts.promptModel,
+      promptGenModel: opts.promptGenModel,
+      extractionProvider: opts.extractionProvider,
+      extractionModel: opts.extractionModel,
+      nPrompts: opts.nPrompts,
+      weights: opts.weights,
+      status: "failed",
+      error: err instanceof Error ? err.message : String(err),
+      startedAt,
+      completedAt: new Date(),
+    });
+  } catch (dbErr) {
+    console.error(
+      `[ai-visibility-score-service] failed to persist failure row for run ${opts.runId}:`,
+      dbErr,
+    );
+  }
+}
+
+async function runVisibilityScoreInner(
+  opts: RunOptions,
+  startedAt: Date,
+  onBrandResolved: (domain: string, brandName: string) => void,
+): Promise<RunResult> {
   const baseTracking: ChatTrackingHeaders = {
     orgId: opts.orgId,
     userId: opts.userId,
@@ -105,6 +158,7 @@ export async function runVisibilityScore(opts: RunOptions): Promise<RunResult> {
   }
   const brandName = asString(brand.name) ?? "(unknown brand)";
   const domain = brand.domain;
+  onBrandResolved(domain, brandName);
 
   const ctx: BrandContext = {
     industry: asString(brandResp.fields["industry"]?.value),

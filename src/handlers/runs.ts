@@ -230,7 +230,7 @@ export async function getRun(req: Request, res: Response): Promise<void> {
       tokensOutput: p.tokensOutput ?? 0,
     }));
 
-  const m = aggregate(extracted, run.domain, run.weights);
+  const m = aggregate(extracted, run.domain ?? "", run.weights);
 
   res.json({
     run: serializeRun(run),
