@@ -64,35 +64,31 @@
           "run": {
             "$ref": "#/components/schemas/VisibilityScoreRunRow"
           },
-          "prompts": {
+          "by_provider": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/PromptDetail"
-            }
-          },
-          "competitors": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/CompetitorDetail"
-            }
+              "$ref": "#/components/schemas/VisibilityScoreByProviderResult"
+            },
+            "description": "One entry per judge provider in the run. Order matches the server config."
           },
           "top_competitors": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/TopCompetitor"
-            }
+            },
+            "description": "Top competitors unioned across all judges (by competitor name)."
           },
           "citation_opportunities": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/CitationOpportunity"
-            }
+            },
+            "description": "Citation domains unioned across all judges."
           }
         },
         "required": [
           "run",
-          "prompts",
-          "competitors",
+          "by_provider",
           "top_competitors",
           "citation_opportunities"
         ]
@@ -121,6 +117,20 @@
             "type": "string",
             "nullable": true,
             "format": "uuid"
+          },
+          "aggregateRunId": {
+            "type": "string",
+            "nullable": true,
+            "format": "uuid",
+            "description": "When non-null, this row is a per-provider child of the aggregate run with this id."
+          },
+          "judgeKind": {
+            "type": "string",
+            "enum": [
+              "aggregate",
+              "per_provider"
+            ],
+            "description": "`aggregate` = parent row, mean across providers. `per_provider` = single judge child row."
           },
           "domain": {
             "type": "string"
@@ -200,6 +210,8 @@
           "brandId",
           "parentRunId",
           "runId",
+          "aggregateRunId",
+          "judgeKind",
           "domain",
           "brandName",
           "llmProvider",
@@ -222,7 +234,8 @@
         ],
         "additionalProperties": {
           "nullable": true
-        }
+        },
+        "description": "Aggregate parent row. Metrics are the mean across all judge providers."
       },
       "VisibilityWeights": {
         "type": "object",
@@ -265,6 +278,53 @@
           "shareOfVoice",
           "sentiment",
           "brandAndUrlRate"
+        ]
+      },
+      "VisibilityScoreByProviderResult": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "run": {
+            "$ref": "#/components/schemas/VisibilityScoreRunRow"
+          },
+          "prompts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PromptDetail"
+            }
+          },
+          "competitors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CompetitorDetail"
+            }
+          },
+          "top_competitors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TopCompetitor"
+            }
+          },
+          "citation_opportunities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CitationOpportunity"
+            }
+          }
+        },
+        "required": [
+          "provider",
+          "model",
+          "run",
+          "prompts",
+          "competitors",
+          "top_competitors",
+          "citation_opportunities"
         ]
       },
       "PromptDetail": {

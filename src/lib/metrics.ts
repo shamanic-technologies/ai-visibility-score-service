@@ -100,6 +100,118 @@ export function urlHost(url: string): string | null {
   }
 }
 
+/**
+ * Combine per-judge AggregateMetrics into a single aggregate.
+ * - Rate metrics (visibility_score, brand_mention_rate, share_of_voice, ...): arithmetic mean over non-null children
+ * - Counts (brand_mention_count, citation_count, ...): sum across children
+ * - top_competitors / citation_opportunities: union by name/domain, mention_count / count summed
+ *
+ * Throws on empty input — fail loud, no silent default.
+ */
+export function aggregateAcrossProviders(perJudge: AggregateMetrics[]): AggregateMetrics {
+  if (perJudge.length === 0) {
+    throw new Error(
+      "[ai-visibility-score-service] aggregateAcrossProviders requires at least one judge result",
+    );
+  }
+
+  const meanOf = (pick: (m: AggregateMetrics) => number | null): number | null => {
+    const values = perJudge.map(pick).filter((v): v is number => v !== null);
+    if (values.length === 0) return null;
+    return values.reduce((a, b) => a + b, 0) / values.length;
+  };
+
+  const meanNumberOf = (pick: (m: AggregateMetrics) => number): number => {
+    return perJudge.reduce((sum, m) => sum + pick(m), 0) / perJudge.length;
+  };
+
+  const sumOf = (pick: (m: AggregateMetrics) => number): number => {
+    return perJudge.reduce((sum, m) => sum + pick(m), 0);
+  };
+
+  // Merge top_competitors by name (case-insensitive)
+  const competitorMap = new Map<
+    string,
+    { name: string; url: string | null; mention_count: number; positions: number[]; net_sentiments: number[] }
+  >();
+  for (const m of perJudge) {
+    for (const c of m.top_competitors) {
+      const key = c.name.trim().toLowerCase();
+      const cur = competitorMap.get(key) ?? {
+        name: c.name,
+        url: null,
+        mention_count: 0,
+        positions: [],
+        net_sentiments: [],
+      };
+      cur.mention_count += c.mention_count;
+      if (c.url && !cur.url) cur.url = c.url;
+      if (c.avg_position !== null) cur.positions.push(c.avg_position);
+      cur.net_sentiments.push(c.net_sentiment);
+      competitorMap.set(key, cur);
+    }
+  }
+  const totalAllMentionsAgg = sumOf((m) => m.brand_mention_count) +
+    [...competitorMap.values()].reduce((s, v) => s + v.mention_count, 0);
+  const top_competitors: TopCompetitor[] = [...competitorMap.values()]
+    .map((v) => ({
+      name: v.name,
+      url: v.url,
+      mention_count: v.mention_count,
+      avg_position: v.positions.length === 0 ? null : v.positions.reduce((a, b) => a + b, 0) / v.positions.length,
+      share_of_voice: totalAllMentionsAgg === 0 ? 0 : v.mention_count / totalAllMentionsAgg,
+      net_sentiment: v.net_sentiments.reduce((a, b) => a + b, 0) / v.net_sentiments.length,
+    }))
+    .sort((a, b) => b.mention_count - a.mention_count)
+    .slice(0, 10);
+
+  // Merge citation_opportunities by domain
+  const citationMap = new Map<string, number>();
+  for (const m of perJudge) {
+    for (const c of m.citation_opportunities) {
+      citationMap.set(c.domain, (citationMap.get(c.domain) ?? 0) + c.count);
+    }
+  }
+  const citation_opportunities: CitationOpportunity[] = [...citationMap.entries()]
+    .map(([domain, count]) => ({ domain, count }))
+    .sort((a, b) => b.count - a.count);
+
+  return {
+    // counts: sum
+    brand_mention_count: sumOf((m) => m.brand_mention_count),
+    url_mention_count: sumOf((m) => m.url_mention_count),
+    brand_and_url_count: sumOf((m) => m.brand_and_url_count),
+    citation_count: sumOf((m) => m.citation_count),
+    positive_count: sumOf((m) => m.positive_count),
+    neutral_count: sumOf((m) => m.neutral_count),
+    negative_count: sumOf((m) => m.negative_count),
+    distinct_competitors_count: competitorMap.size,
+    // rates: arithmetic mean
+    brand_mention_rate: meanNumberOf((m) => m.brand_mention_rate),
+    url_mention_rate: meanNumberOf((m) => m.url_mention_rate),
+    brand_and_url_rate: meanNumberOf((m) => m.brand_and_url_rate),
+    avg_position: meanOf((m) => m.avg_position),
+    position_score: meanOf((m) => m.position_score),
+    share_of_voice: meanNumberOf((m) => m.share_of_voice),
+    weighted_share_of_voice: meanNumberOf((m) => m.weighted_share_of_voice),
+    citation_rate: meanNumberOf((m) => m.citation_rate),
+    citation_share_of_voice: meanNumberOf((m) => m.citation_share_of_voice),
+    net_sentiment: meanNumberOf((m) => m.net_sentiment),
+    avg_sentiment_score: meanOf((m) => m.avg_sentiment_score),
+    visibility_score: meanNumberOf((m) => m.visibility_score),
+    // response length: arithmetic mean of children's means (children's are already means over N prompts)
+    avg_response_length: Math.round(meanNumberOf((m) => m.avg_response_length)),
+    response_length_when_brand_found: meanOf((m) => m.response_length_when_brand_found) === null
+      ? null
+      : Math.round(meanOf((m) => m.response_length_when_brand_found)!),
+    response_length_when_brand_not_found: meanOf((m) => m.response_length_when_brand_not_found) === null
+      ? null
+      : Math.round(meanOf((m) => m.response_length_when_brand_not_found)!),
+    top_competitors,
+    citation_opportunities,
+  };
+}
+
 export function aggregate(
   prompts: ExtractedPrompt[],
   targetDomain: string,

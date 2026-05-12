@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { sql, eq, and, gte, lte, desc } from "drizzle-orm";
+import { sql, eq, and, gte, lte, desc, isNull } from "drizzle-orm";
 import { db } from "../db/index.js";
 import {
   visibilityScoreRuns,
@@ -7,7 +7,7 @@ import {
   visibilityScoreCompetitors,
 } from "../db/schema.js";
 import { runVisibilityScore } from "../lib/run.js";
-import { aggregate } from "../lib/metrics.js";
+import { aggregate, aggregateAcrossProviders } from "../lib/metrics.js";
 import { VISIBILITY_RUN_CONFIG } from "../lib/config.js";
 import { RunRequestSchema, RunListQuerySchema } from "../schemas.js";
 
@@ -43,7 +43,7 @@ export async function postRuns(req: Request, res: Response): Promise<void> {
   }
 
   console.log(
-    `[ai-visibility-score-service] starting run org=${req.orgId} brand=${brandId} n=${VISIBILITY_RUN_CONFIG.nPrompts}`,
+    `[ai-visibility-score-service] starting run org=${req.orgId} brand=${brandId} n=${VISIBILITY_RUN_CONFIG.nPrompts} judges=${VISIBILITY_RUN_CONFIG.judges.map((j) => `${j.provider}/${j.model}`).join(",")}`,
   );
 
   let r;
@@ -57,8 +57,7 @@ export async function postRuns(req: Request, res: Response): Promise<void> {
       campaignId: req.campaignId,
       featureSlug: req.featureSlug,
       workflowSlug: req.workflowSlug,
-      provider: VISIBILITY_RUN_CONFIG.provider,
-      promptModel: VISIBILITY_RUN_CONFIG.promptModel,
+      judges: VISIBILITY_RUN_CONFIG.judges,
       promptGenProvider: VISIBILITY_RUN_CONFIG.promptGenProvider,
       promptGenModel: VISIBILITY_RUN_CONFIG.promptGenModel,
       extractionProvider: VISIBILITY_RUN_CONFIG.extractionProvider,
@@ -79,8 +78,15 @@ export async function postRuns(req: Request, res: Response): Promise<void> {
     results: [
       {
         run: serializeRun(r.run),
-        prompts: r.prompts.map(serializePrompt),
-        competitors: r.competitors.map(serializeCompetitor),
+        by_provider: r.byProvider.map((j) => ({
+          provider: j.judge.provider,
+          model: j.judge.model,
+          run: serializeRun(j.run),
+          prompts: j.prompts.map(serializePrompt),
+          competitors: j.competitors.map(serializeCompetitor),
+          top_competitors: j.metrics.top_competitors ?? [],
+          citation_opportunities: j.metrics.citation_opportunities ?? [],
+        })),
         top_competitors: r.metrics.top_competitors,
         citation_opportunities: r.metrics.citation_opportunities,
       },
@@ -102,7 +108,11 @@ export async function listRuns(req: Request, res: Response): Promise<void> {
 
   const limit = parsed.data.limit ?? 50;
   const offset = parsed.data.offset ?? 0;
-  const filters = [eq(visibilityScoreRuns.orgId, req.orgId)];
+  // List endpoint returns aggregate (parent) rows only — children are accessed via GET /:id.
+  const filters = [
+    eq(visibilityScoreRuns.orgId, req.orgId),
+    isNull(visibilityScoreRuns.aggregateRunId),
+  ];
   if (parsed.data.brandId) filters.push(eq(visibilityScoreRuns.brandId, parsed.data.brandId));
   if (parsed.data.domain) filters.push(eq(visibilityScoreRuns.domain, parsed.data.domain));
   if (parsed.data.from) filters.push(gte(visibilityScoreRuns.createdAt, new Date(parsed.data.from)));
@@ -170,74 +180,132 @@ export async function getRun(req: Request, res: Response): Promise<void> {
     return;
   }
 
-  const [run] = await db
+  // Look up the requested row. May be an aggregate parent or a per-provider child.
+  const [requested] = await db
     .select()
     .from(visibilityScoreRuns)
     .where(and(eq(visibilityScoreRuns.id, id), eq(visibilityScoreRuns.orgId, req.orgId)));
 
-  if (!run) {
+  if (!requested) {
     res.status(404).json({ error: "Run not found" });
     return;
   }
 
-  const promptRows = await db
+  // Normalize to the aggregate parent — clients should always receive parent + by_provider.
+  const parentId = requested.aggregateRunId ?? requested.id;
+  const [parent] =
+    requested.aggregateRunId === null
+      ? [requested]
+      : await db
+          .select()
+          .from(visibilityScoreRuns)
+          .where(and(eq(visibilityScoreRuns.id, parentId), eq(visibilityScoreRuns.orgId, req.orgId)));
+
+  if (!parent) {
+    res.status(404).json({ error: "Aggregate parent row not found" });
+    return;
+  }
+
+  const children = await db
     .select()
-    .from(visibilityScorePrompts)
+    .from(visibilityScoreRuns)
     .where(
-      and(eq(visibilityScorePrompts.runIdFk, run.id), eq(visibilityScorePrompts.orgId, req.orgId)),
+      and(eq(visibilityScoreRuns.aggregateRunId, parent.id), eq(visibilityScoreRuns.orgId, req.orgId)),
     );
 
-  const competitorRows = await db
-    .select()
-    .from(visibilityScoreCompetitors)
-    .where(
-      and(
-        eq(visibilityScoreCompetitors.runIdFk, run.id),
-        eq(visibilityScoreCompetitors.orgId, req.orgId),
-      ),
-    );
+  const byProvider = await Promise.all(
+    children.map(async (child) => {
+      const promptRows = await db
+        .select()
+        .from(visibilityScorePrompts)
+        .where(
+          and(
+            eq(visibilityScorePrompts.runIdFk, child.id),
+            eq(visibilityScorePrompts.orgId, req.orgId!),
+          ),
+        );
 
-  const extracted = promptRows
-    .slice()
-    .sort((a, b) => a.promptIndex - b.promptIndex)
-    .map((p) => ({
-      promptIndex: p.promptIndex,
-      promptText: p.promptText,
-      responseText: p.responseText,
-      responseLengthChars: p.responseLengthChars ?? p.responseText.length,
-      brandFound: p.brandFound ?? false,
-      brandCount: p.brandCount ?? 0,
-      brandPosition: p.brandPosition,
-      urlFound: p.urlFound ?? false,
-      urlCount: p.urlCount ?? 0,
-      brandAndUrlCoOccurrence: p.brandAndUrlCoOccurrence ?? false,
-      maxBrandsInResponse: p.maxBrandsInResponse ?? 0,
-      sentiment: (p.sentiment ?? "neutral") as "positive" | "neutral" | "negative",
-      sentimentScore: p.sentimentScore ? Number(p.sentimentScore) : 0,
-      citationUrls: p.citationUrls ?? [],
-      competitors: competitorRows
-        .filter((c) => c.promptIdFk === p.id)
-        .map((c) => ({
-          name: c.competitorName,
-          url: c.competitorUrl,
-          position: c.position ?? 0,
-          sentiment: (c.sentiment ?? "neutral") as "positive" | "neutral" | "negative",
-          sentimentScore: c.sentimentScore ? Number(c.sentimentScore) : 0,
-          citationUrl: c.citationUrl,
-        })),
-      latencyMs: p.latencyMs ?? 0,
-      tokensInput: p.tokensInput ?? 0,
-      tokensOutput: p.tokensOutput ?? 0,
-    }));
+      const competitorRows = await db
+        .select()
+        .from(visibilityScoreCompetitors)
+        .where(
+          and(
+            eq(visibilityScoreCompetitors.runIdFk, child.id),
+            eq(visibilityScoreCompetitors.orgId, req.orgId!),
+          ),
+        );
 
-  const m = aggregate(extracted, run.domain ?? "", run.weights);
+      const extracted = promptRows
+        .slice()
+        .sort((a, b) => a.promptIndex - b.promptIndex)
+        .map((p) => ({
+          promptIndex: p.promptIndex,
+          promptText: p.promptText,
+          responseText: p.responseText,
+          responseLengthChars: p.responseLengthChars ?? p.responseText.length,
+          brandFound: p.brandFound ?? false,
+          brandCount: p.brandCount ?? 0,
+          brandPosition: p.brandPosition,
+          urlFound: p.urlFound ?? false,
+          urlCount: p.urlCount ?? 0,
+          brandAndUrlCoOccurrence: p.brandAndUrlCoOccurrence ?? false,
+          maxBrandsInResponse: p.maxBrandsInResponse ?? 0,
+          sentiment: (p.sentiment ?? "neutral") as "positive" | "neutral" | "negative",
+          sentimentScore: p.sentimentScore ? Number(p.sentimentScore) : 0,
+          citationUrls: p.citationUrls ?? [],
+          competitors: competitorRows
+            .filter((c) => c.promptIdFk === p.id)
+            .map((c) => ({
+              name: c.competitorName,
+              url: c.competitorUrl,
+              position: c.position ?? 0,
+              sentiment: (c.sentiment ?? "neutral") as "positive" | "neutral" | "negative",
+              sentimentScore: c.sentimentScore ? Number(c.sentimentScore) : 0,
+              citationUrl: c.citationUrl,
+            })),
+          latencyMs: p.latencyMs ?? 0,
+          tokensInput: p.tokensInput ?? 0,
+          tokensOutput: p.tokensOutput ?? 0,
+        }));
+
+      const childMetrics =
+        promptRows.length === 0
+          ? null
+          : aggregate(extracted, parent.domain ?? "", parent.weights);
+
+      return {
+        provider: child.llmProvider,
+        model: child.llmModel,
+        run: serializeRun(child),
+        prompts: promptRows.map(serializePrompt),
+        competitors: competitorRows.map(serializeCompetitor),
+        top_competitors: childMetrics?.top_competitors ?? [],
+        citation_opportunities: childMetrics?.citation_opportunities ?? [],
+        metrics: childMetrics,
+      };
+    }),
+  );
+
+  const successfulChildMetrics = byProvider
+    .map((b) => b.metrics)
+    .filter((m): m is NonNullable<typeof m> => m !== null);
+
+  const parentMerged =
+    successfulChildMetrics.length > 0 ? aggregateAcrossProviders(successfulChildMetrics) : null;
 
   res.json({
-    run: serializeRun(run),
-    prompts: promptRows.map(serializePrompt),
-    competitors: competitorRows.map(serializeCompetitor),
-    top_competitors: m.top_competitors,
-    citation_opportunities: m.citation_opportunities,
+    run: serializeRun(parent),
+    by_provider: byProvider.map((b) => ({
+      provider: b.provider,
+      model: b.model,
+      run: b.run,
+      prompts: b.prompts,
+      competitors: b.competitors,
+      top_competitors: b.top_competitors,
+      citation_opportunities: b.citation_opportunities,
+    })),
+    top_competitors: parentMerged?.top_competitors ?? [],
+    citation_opportunities: parentMerged?.citation_opportunities ?? [],
   });
 }
 

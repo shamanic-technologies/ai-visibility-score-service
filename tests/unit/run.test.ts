@@ -38,12 +38,14 @@ const opts = {
   brandId: BRAND_ID,
   orgId: ORG_ID,
   runId: RUN_ID,
-  provider: "google" as const,
-  promptModel: "pro" as const,
+  judges: [
+    { provider: "google" as const, model: "pro" as const },
+    { provider: "anthropic" as const, model: "opus" as const },
+  ],
   promptGenProvider: "google" as const,
   promptGenModel: "flash" as const,
-  extractionProvider: "anthropic" as const,
-  extractionModel: "haiku" as const,
+  extractionProvider: "google" as const,
+  extractionModel: "flash" as const,
   nPrompts: 2,
   weights: {
     brandMentionRate: 0.25,
@@ -88,7 +90,7 @@ afterEach(() => {
 });
 
 describe("runVisibilityScore — failure persistence", () => {
-  it("inserts a failed row when extractor throws (brand info known)", async () => {
+  it("inserts a failed aggregate row when ALL judges fail", async () => {
     mockBrandSuccess();
     vi.mocked(generatePrompts).mockResolvedValue(["q1", "q2"]);
     vi.mocked(chatComplete).mockResolvedValue({
@@ -100,12 +102,15 @@ describe("runVisibilityScore — failure persistence", () => {
 
     const valuesSpy = captureInsertedRow();
 
-    await expect(runVisibilityScore(opts)).rejects.toThrow("chat-service 502");
+    await expect(runVisibilityScore(opts)).rejects.toThrow(/all judges failed/);
 
     expect(db.insert).toHaveBeenCalledTimes(1);
     const inserted = valuesSpy.mock.calls[0][0];
     expect(inserted.status).toBe("failed");
-    expect(inserted.error).toBe("chat-service 502");
+    expect(inserted.judgeKind).toBe("aggregate");
+    expect(inserted.aggregateRunId).toBeNull();
+    expect(inserted.llmProvider).toBe("aggregate");
+    expect(inserted.llmModel).toBe("google/pro,anthropic/opus");
     expect(inserted.orgId).toBe(ORG_ID);
     expect(inserted.brandId).toBe(BRAND_ID);
     expect(inserted.runId).toBe(RUN_ID);
@@ -115,7 +120,7 @@ describe("runVisibilityScore — failure persistence", () => {
     expect(inserted.completedAt).toBeInstanceOf(Date);
   });
 
-  it("inserts a failed row with null brand info when brand-fetch throws", async () => {
+  it("inserts a failed aggregate row with null brand info when brand-fetch throws", async () => {
     vi.mocked(extractBrandFields).mockRejectedValue(new Error("brand-service down"));
 
     const valuesSpy = captureInsertedRow();
@@ -125,6 +130,7 @@ describe("runVisibilityScore — failure persistence", () => {
     expect(db.insert).toHaveBeenCalledTimes(1);
     const inserted = valuesSpy.mock.calls[0][0];
     expect(inserted.status).toBe("failed");
+    expect(inserted.judgeKind).toBe("aggregate");
     expect(inserted.error).toBe("brand-service down");
     expect(inserted.orgId).toBe(ORG_ID);
     expect(inserted.brandId).toBe(BRAND_ID);
@@ -154,9 +160,8 @@ describe("runVisibilityScore — failure persistence", () => {
     });
 
     vi.mocked(db.transaction).mockResolvedValue({
-      runRow: { id: "x" },
-      promptRows: [],
-      competitorRows: [],
+      parentRow: { id: "x" },
+      judgeRuns: [],
     } as any);
 
     await runVisibilityScore(opts);
@@ -172,5 +177,11 @@ describe("runVisibilityScore — failure persistence", () => {
     });
 
     await expect(runVisibilityScore(opts)).rejects.toThrow("brand-service down");
+  });
+
+  it("throws when opts.judges is empty (fail loud, no silent default)", async () => {
+    await expect(
+      runVisibilityScore({ ...opts, judges: [] }),
+    ).rejects.toThrow(/at least one judge is required/);
   });
 });
