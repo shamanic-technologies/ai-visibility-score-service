@@ -151,7 +151,11 @@ export const RunRowSchema = z
   .object({
     id: z.string().uuid(),
     orgId: z.string().uuid(),
+    userId: z.string().uuid().nullable(),
     brandId: z.string().uuid(),
+    campaignId: z.string().uuid().nullable(),
+    featureSlug: z.string().nullable(),
+    workflowSlug: z.string().nullable(),
     parentRunId: z.string().uuid().nullable(),
     runId: z.string().uuid().nullable(),
     aggregateRunId: z.string().uuid().nullable().openapi({
@@ -261,6 +265,7 @@ export const RunListResponseSchema = z
 
 export const RunListQuerySchema = z.object({
   brandId: z.string().uuid().optional(),
+  campaignId: z.string().uuid().optional(),
   domain: z.string().optional(),
   from: z.string().optional(),
   to: z.string().optional(),
@@ -274,7 +279,7 @@ registry.registerPath({
   tags: ["VisibilityScore"],
   summary: "List visibility-score runs with deltas",
   description:
-    "Returns runs scoped to the requesting org, optionally filtered by brandId/domain/date range. Each row includes a delta block vs. the immediately previous run for the same brand.",
+    "Returns runs scoped to the requesting org, optionally filtered by brandId/campaignId/domain/date range. Each row includes a delta block vs. the immediately previous run for the same brand.",
   request: {
     headers: z.object(orgScopedHeadersOptionalBrand),
     query: RunListQuerySchema,

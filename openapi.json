@@ -104,9 +104,27 @@
             "type": "string",
             "format": "uuid"
           },
+          "userId": {
+            "type": "string",
+            "nullable": true,
+            "format": "uuid"
+          },
           "brandId": {
             "type": "string",
             "format": "uuid"
+          },
+          "campaignId": {
+            "type": "string",
+            "nullable": true,
+            "format": "uuid"
+          },
+          "featureSlug": {
+            "type": "string",
+            "nullable": true
+          },
+          "workflowSlug": {
+            "type": "string",
+            "nullable": true
           },
           "parentRunId": {
             "type": "string",
@@ -207,7 +225,11 @@
         "required": [
           "id",
           "orgId",
+          "userId",
           "brandId",
+          "campaignId",
+          "featureSlug",
+          "workflowSlug",
           "parentRunId",
           "runId",
           "aggregateRunId",
@@ -819,7 +841,7 @@
           "VisibilityScore"
         ],
         "summary": "List visibility-score runs with deltas",
-        "description": "Returns runs scoped to the requesting org, optionally filtered by brandId/domain/date range. Each row includes a delta block vs. the immediately previous run for the same brand.",
+        "description": "Returns runs scoped to the requesting org, optionally filtered by brandId/campaignId/domain/date range. Each row includes a delta block vs. the immediately previous run for the same brand.",
         "parameters": [
           {
             "schema": {
@@ -828,6 +850,15 @@
             },
             "required": false,
             "name": "brandId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": false,
+            "name": "campaignId",
             "in": "query"
           },
           {

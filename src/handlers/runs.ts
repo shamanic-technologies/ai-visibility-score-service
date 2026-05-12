@@ -114,6 +114,7 @@ export async function listRuns(req: Request, res: Response): Promise<void> {
     isNull(visibilityScoreRuns.aggregateRunId),
   ];
   if (parsed.data.brandId) filters.push(eq(visibilityScoreRuns.brandId, parsed.data.brandId));
+  if (parsed.data.campaignId) filters.push(eq(visibilityScoreRuns.campaignId, parsed.data.campaignId));
   if (parsed.data.domain) filters.push(eq(visibilityScoreRuns.domain, parsed.data.domain));
   if (parsed.data.from) filters.push(gte(visibilityScoreRuns.createdAt, new Date(parsed.data.from)));
   if (parsed.data.to) filters.push(lte(visibilityScoreRuns.createdAt, new Date(parsed.data.to)));
