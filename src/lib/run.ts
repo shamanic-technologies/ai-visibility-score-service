@@ -20,7 +20,7 @@ import type { JudgeConfig } from "./config.js";
 
 const PROMPT_CONCURRENCY = 5;
 
-export const JUDGE_SYSTEM_PROMPT = "You are a helpful assistant. Answer the user's question.";
+export const JUDGE_SYSTEM_PROMPT = "";
 
 export interface RunOptions {
   brandId: string;

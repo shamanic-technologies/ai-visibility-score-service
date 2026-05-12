@@ -567,7 +567,7 @@ describe("GET /orgs/visibility-score-runs/:id", () => {
       orgId: ORG_ID,
       promptIndex: 0,
       promptText: "best CRM for early stage startups",
-      judgeSystemPrompt: "You are a helpful assistant. Answer the user's question.",
+      judgeSystemPrompt: "",
       judgeUserMessage: "best CRM for early stage startups",
       extractorSystemPrompt: "extractor sys prompt",
       extractorUserMessage: "Target brand:\n- name: Acme\n- domain: acme.com\n\nLLM response to analyze:\n\"\"\"\nAcme is a great company.\n\"\"\"",
@@ -632,9 +632,7 @@ describe("GET /orgs/visibility-score-runs/:id", () => {
 
     // Debug payload exposure: judge + extractor + prompt-gen prompts must be returned verbatim.
     const promptRow = res.body.by_provider[0].prompts[0];
-    expect(promptRow.judgeSystemPrompt).toBe(
-      "You are a helpful assistant. Answer the user's question.",
-    );
+    expect(promptRow.judgeSystemPrompt).toBe("");
     expect(promptRow.judgeUserMessage).toBe("best CRM for early stage startups");
     // The judge user message MUST equal the prompt text — server injects nothing.
     expect(promptRow.judgeUserMessage).toBe(promptRow.promptText);
