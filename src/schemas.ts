@@ -211,7 +211,7 @@ export const RunRowSchema = z
     }),
     promptGenUserMessage: z.string().nullable().optional().openapi({
       description:
-        "Exact user message string sent to the prompt-generator LLM. Includes the brand context fields (industry, audience, offerings, geography) — these influence which prompts get generated.",
+        "Exact user message string sent to the prompt-generator LLM. Includes the brand context fields (category, specific_offerings, target_audience, primary_geography, positioning) — these influence which prompts get generated.",
     }),
     status: z.string(),
     startedAt: z.string().nullable(),

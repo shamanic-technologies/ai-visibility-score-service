@@ -17,6 +17,13 @@ vi.mock("../../src/lib/chat-client.js", () => ({
 
 vi.mock("../../src/lib/prompt-gen.js", () => ({
   generatePrompts: vi.fn(),
+  SYSTEM_PROMPT: "MOCK_SYSTEM_PROMPT",
+}));
+
+vi.mock("../../src/lib/prompt-cache.js", () => ({
+  cacheLookup: vi.fn(),
+  cacheWrite: vi.fn(),
+  computeSystemPromptHash: vi.fn().mockReturnValue("mock-hash"),
 }));
 
 vi.mock("../../src/lib/extractor.js", () => ({
@@ -28,6 +35,7 @@ import { db } from "../../src/db/index.js";
 import { extractBrandFields } from "../../src/lib/brand-client.js";
 import { chatComplete } from "../../src/lib/chat-client.js";
 import { generatePrompts } from "../../src/lib/prompt-gen.js";
+import { cacheLookup, cacheWrite } from "../../src/lib/prompt-cache.js";
 import { extractFromResponse } from "../../src/lib/extractor.js";
 
 const ORG_ID = "11111111-1111-4111-8111-111111111111";
@@ -39,11 +47,11 @@ const opts = {
   orgId: ORG_ID,
   runId: RUN_ID,
   judges: [
-    { provider: "google" as const, model: "pro" as const },
-    { provider: "anthropic" as const, model: "opus" as const },
+    { provider: "google" as const, model: "flash" as const },
+    { provider: "anthropic" as const, model: "sonnet" as const },
   ],
   promptGenProvider: "google" as const,
-  promptGenModel: "flash" as const,
+  promptGenModel: "pro" as const,
   extractionProvider: "google" as const,
   extractionModel: "pro" as const,
   nPrompts: 2,
@@ -67,10 +75,11 @@ function mockBrandSuccess() {
       },
     ],
     fields: {
-      industry: { value: "saas" },
-      target_audience: { value: "smb" },
-      offerings: { value: "thing" },
-      geography: { value: "us" },
+      category: { value: "saas crm vertical" },
+      specific_offerings: { value: "free plan, paid plan" },
+      target_audience: { value: "smb founders" },
+      primary_geography: { value: "us" },
+      positioning: { value: "no-code crm" },
     },
   });
 }
@@ -83,6 +92,8 @@ function captureInsertedRow() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(cacheLookup).mockResolvedValue(null);
+  vi.mocked(cacheWrite).mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -114,7 +125,7 @@ describe("runVisibilityScore — failure persistence", () => {
     expect(inserted.judgeKind).toBe("aggregate");
     expect(inserted.aggregateRunId).toBeNull();
     expect(inserted.llmProvider).toBe("aggregate");
-    expect(inserted.llmModel).toBe("google/pro,anthropic/opus");
+    expect(inserted.llmModel).toBe("google/flash,anthropic/sonnet");
     expect(inserted.orgId).toBe(ORG_ID);
     expect(inserted.brandId).toBe(BRAND_ID);
     expect(inserted.runId).toBe(RUN_ID);
@@ -195,5 +206,73 @@ describe("runVisibilityScore — failure persistence", () => {
     await expect(
       runVisibilityScore({ ...opts, judges: [] }),
     ).rejects.toThrow(/at least one judge is required/);
+  });
+});
+
+describe("runVisibilityScore — prompt cache", () => {
+  function mockSuccessPath() {
+    mockBrandSuccess();
+    vi.mocked(chatComplete).mockResolvedValue({
+      content: "answer",
+      tokensInput: 1,
+      tokensOutput: 1,
+    });
+    vi.mocked(extractFromResponse).mockResolvedValue({
+      extraction: {
+        brandFound: true,
+        brandCount: 1,
+        brandPosition: 1,
+        urlFound: false,
+        urlCount: 0,
+        maxBrandsInResponse: 1,
+        sentiment: "positive",
+        sentimentScore: 0.5,
+        citationUrls: [],
+        competitors: [],
+      },
+      systemPrompt: "sys-ext",
+      userMessage: "user-ext",
+    });
+    vi.mocked(db.transaction).mockResolvedValue({
+      parentRow: { id: "x" },
+      judgeRuns: [],
+    } as any);
+  }
+
+  it("calls generatePrompts and writes to cache on miss", async () => {
+    mockSuccessPath();
+    vi.mocked(cacheLookup).mockResolvedValue(null);
+    vi.mocked(generatePrompts).mockResolvedValue({
+      prompts: ["q1", "q2"],
+      systemPrompt: "sys-pg",
+      userMessage: "user-pg",
+    });
+
+    await runVisibilityScore(opts);
+
+    expect(generatePrompts).toHaveBeenCalledTimes(1);
+    expect(cacheWrite).toHaveBeenCalledTimes(1);
+    const writeArg = vi.mocked(cacheWrite).mock.calls[0][0];
+    expect(writeArg.brandId).toBe(BRAND_ID);
+    expect(writeArg.nPrompts).toBe(2);
+    expect(writeArg.promptGenProvider).toBe("google");
+    expect(writeArg.promptGenModel).toBe("pro");
+    expect(writeArg.prompts).toEqual(["q1", "q2"]);
+    expect(writeArg.systemPrompt).toBe("sys-pg");
+    expect(writeArg.userMessage).toBe("user-pg");
+  });
+
+  it("skips generatePrompts when cache hit", async () => {
+    mockSuccessPath();
+    vi.mocked(cacheLookup).mockResolvedValue({
+      prompts: ["cached1", "cached2"],
+      systemPrompt: "sys-cached",
+      userMessage: "user-cached",
+    });
+
+    await runVisibilityScore(opts);
+
+    expect(generatePrompts).not.toHaveBeenCalled();
+    expect(cacheWrite).not.toHaveBeenCalled();
   });
 });

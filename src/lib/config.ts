@@ -19,11 +19,11 @@ export interface VisibilityRunConfig {
 
 export const VISIBILITY_RUN_CONFIG: VisibilityRunConfig = {
   judges: [
-    { provider: "google", model: "pro" },
-    { provider: "anthropic", model: "opus" },
+    { provider: "google", model: "flash" },
+    { provider: "anthropic", model: "sonnet" },
   ],
   promptGenProvider: "google",
-  promptGenModel: "flash",
+  promptGenModel: "pro",
   extractionProvider: "google",
   extractionModel: "pro",
   nPrompts: 25,

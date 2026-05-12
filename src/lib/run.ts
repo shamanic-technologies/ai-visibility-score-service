@@ -8,7 +8,8 @@ import {
 } from "../db/schema.js";
 import { extractBrandFields } from "./brand-client.js";
 import { chatComplete, type ChatModel, type ChatProvider, type ChatTrackingHeaders } from "./chat-client.js";
-import { generatePrompts, type BrandContext } from "./prompt-gen.js";
+import { generatePrompts, SYSTEM_PROMPT as PROMPT_GEN_SYSTEM_PROMPT, type BrandContext } from "./prompt-gen.js";
+import { cacheLookup, cacheWrite, computeSystemPromptHash } from "./prompt-cache.js";
 import { extractFromResponse } from "./extractor.js";
 import {
   aggregate,
@@ -240,10 +241,31 @@ async function runVisibilityScoreInner(
 
   const brandResp = await extractBrandFields(
     [
-      { key: "industry", description: "primary industry vertical" },
-      { key: "target_audience", description: "who the brand serves" },
-      { key: "offerings", description: "products/services" },
-      { key: "geography", description: "primary markets" },
+      {
+        key: "category",
+        description:
+          "Narrowest service category the brand belongs to — not the industry parent. Two-to-five words. The category must be specific enough that two firms inside it are direct substitutes.",
+      },
+      {
+        key: "specific_offerings",
+        description:
+          "Concrete named products, programs, packages, routes, tiers or service lines listed on the brand's site. Use the brand's own names. Comma-separated list.",
+      },
+      {
+        key: "target_audience",
+        description:
+          "The specific buyer segment (nationality, wealth bracket, life situation, company stage, role) — not a generic demographic.",
+      },
+      {
+        key: "primary_geography",
+        description:
+          "Where the service is delivered AND the markets it serves. State both when they differ.",
+      },
+      {
+        key: "positioning",
+        description:
+          "The single sharpest differentiation claim from the brand's own site (license, independence, vintage, certification, awards, regulator, methodology).",
+      },
     ],
     {
       orgId: opts.orgId,
@@ -277,18 +299,44 @@ async function runVisibilityScoreInner(
   onBrandResolved(domain, brandName);
 
   const ctx: BrandContext = {
-    industry: asString(brandResp.fields["industry"]?.value),
+    category: asString(brandResp.fields["category"]?.value),
+    specific_offerings: asString(brandResp.fields["specific_offerings"]?.value),
     target_audience: asString(brandResp.fields["target_audience"]?.value),
-    offerings: asString(brandResp.fields["offerings"]?.value),
-    geography: asString(brandResp.fields["geography"]?.value),
+    primary_geography: asString(brandResp.fields["primary_geography"]?.value),
+    positioning: asString(brandResp.fields["positioning"]?.value),
   };
 
   // Generate prompts once; same prompts feed every judge for fair comparison.
-  const promptGen = await generatePrompts(ctx, opts.nPrompts, {
-    provider: opts.promptGenProvider,
-    model: opts.promptGenModel,
-    tracking: baseTracking,
-  });
+  // Cache lookup keyed by (brandId, n, provider, model, system_prompt_hash) — 30-day TTL.
+  // Reuse keeps week-over-week reports comparable and skips one LLM call per run.
+  const systemPromptHash = computeSystemPromptHash(PROMPT_GEN_SYSTEM_PROMPT);
+  const cacheKey = {
+    brandId: opts.brandId,
+    nPrompts: opts.nPrompts,
+    promptGenProvider: opts.promptGenProvider,
+    promptGenModel: opts.promptGenModel,
+    systemPromptHash,
+  };
+  const cached = await cacheLookup(cacheKey);
+  let promptGen: { prompts: string[]; systemPrompt: string; userMessage: string };
+  if (cached) {
+    console.log(
+      `[ai-visibility-score-service] prompt cache hit for brand ${opts.brandId} (${opts.promptGenProvider}/${opts.promptGenModel}, n=${opts.nPrompts})`,
+    );
+    promptGen = cached;
+  } else {
+    promptGen = await generatePrompts(ctx, opts.nPrompts, {
+      provider: opts.promptGenProvider,
+      model: opts.promptGenModel,
+      tracking: baseTracking,
+    });
+    await cacheWrite({
+      ...cacheKey,
+      systemPrompt: promptGen.systemPrompt,
+      userMessage: promptGen.userMessage,
+      prompts: promptGen.prompts,
+    });
+  }
   const prompts = promptGen.prompts;
 
   // Run all judges in parallel.

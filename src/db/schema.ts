@@ -115,6 +115,33 @@ export const visibilityScorePrompts = pgTable(
   ],
 );
 
+export const visibilityScorePromptCache = pgTable(
+  "visibility_score_prompt_cache",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    brandId: uuid("brand_id").notNull(),
+    nPrompts: integer("n_prompts").notNull(),
+    promptGenProvider: text("prompt_gen_provider").notNull(),
+    promptGenModel: text("prompt_gen_model").notNull(),
+    systemPromptHash: text("system_prompt_hash").notNull(),
+    systemPrompt: text("system_prompt").notNull(),
+    userMessage: text("user_message").notNull(),
+    prompts: jsonb("prompts").$type<string[]>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    index("vspc_brand_idx").on(t.brandId),
+    index("vspc_lookup_idx").on(
+      t.brandId,
+      t.nPrompts,
+      t.promptGenProvider,
+      t.promptGenModel,
+      t.systemPromptHash,
+    ),
+  ],
+);
+
 export const visibilityScoreCompetitors = pgTable(
   "visibility_score_competitors",
   {
@@ -157,3 +184,5 @@ export type VisibilityScorePrompt = typeof visibilityScorePrompts.$inferSelect;
 export type NewVisibilityScorePrompt = typeof visibilityScorePrompts.$inferInsert;
 export type VisibilityScoreCompetitor = typeof visibilityScoreCompetitors.$inferSelect;
 export type NewVisibilityScoreCompetitor = typeof visibilityScoreCompetitors.$inferInsert;
+export type VisibilityScorePromptCache = typeof visibilityScorePromptCache.$inferSelect;
+export type NewVisibilityScorePromptCache = typeof visibilityScorePromptCache.$inferInsert;

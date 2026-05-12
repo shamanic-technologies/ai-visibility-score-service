@@ -2,27 +2,75 @@ import { chatComplete, type ChatModel, type ChatProvider, type ChatTrackingHeade
 import { safeParseJson } from "./safe-parse-json.js";
 
 export interface BrandContext {
-  industry?: string;
+  category?: string;
+  specific_offerings?: string;
   target_audience?: string;
-  offerings?: string;
-  geography?: string;
+  primary_geography?: string;
+  positioning?: string;
 }
 
-export const SYSTEM_PROMPT = `You generate plausible, user-style search queries for testing an LLM's brand visibility.
+export const SYSTEM_PROMPT = `You generate user-style search queries to measure a brand's visibility in LLM answers.
 
-Return STRICT JSON shaped exactly as: {"prompts": ["query 1", "query 2", ...]}
+OUTPUT
+Return STRICT JSON: {"prompts": ["query 1", "query 2", ...]}
+No numbering, no bullets, no commentary outside the JSON.
 
-Requirements for the queries:
-- Short, natural, the way a real person would type into an LLM (e.g. "best CRM for early stage SaaS startups", "how do I run cold outreach for B2B").
-- DO NOT name the target brand or any specific competitor by name.
-- Vary intent across the set — mix comparative ("best X for Y"), problem-solving ("how to do Z"), and recommendation ("recommend a Z for W") queries.
-- Each query must be a standalone search-style question or request, not a paragraph.
-- No numbering, no bullets — only the JSON array of plain strings.`;
+CORE RULE — VENDOR-CITABLE QUERIES ONLY
+Every query MUST be one where a typical LLM answer would name specific firms, vendors, products, or service providers — not just concepts, country lists, regulatory steps, or generic how-to walkthroughs. Skip purely educational, definitional, or tutorial queries unless they implicitly ask "who can do this for me".
+
+NICHE GROUNDING
+Queries must sit inside the brand's NARROW category and reference its SPECIFIC OFFERINGS by name (or close paraphrase). Do NOT drift to the parent industry, adjacent geographies, or sibling product categories.
+
+NEUTRALITY — NO NAMED ENTITIES
+Never name the target brand. Never name a competitor firm, product, or provider. Never name any specific company at all. Queries must be open-ended so the LLM is free to enumerate the market on its own. Naming any vendor in the query biases the answer set and corrupts the measurement.
+
+INTENT MIX (enforced across the N queries)
+- ~40% recommendation / best-of  ("best X for Y", "top X firms in {market} {year}")
+- ~25% comparison / open enumeration  ("compare top X firms", "X firms compared", "leading X providers")
+- ~20% procurement / discriminator  ("who offers X", "which firm provides X", "independent X advisor", "licensed X provider in {market}")
+- ~15% problem-solving with vendor implication  ("I need X done, who can help", "best firm to handle X for Y")
+0% pure tutorial / definitional / step-by-step. 0% generic country, program, or category comparison without a vendor angle.
+
+COMPARISON BUCKET — OPEN ENUMERATION ONLY
+Comparison queries must trigger an open market list. No named entity in the query.
+- Allowed shapes: "compare top X firms for Y", "best X providers compared", "leading X firms in {market}", "X firms ranked".
+- Forbidden shapes: any query naming a specific vendor, brand, product, or company (including "{brand} vs {other}", "alternatives to {brand}", "{brand} competitors", "is {brand} the best").
+
+STYLE
+- Short, natural, 30–100 characters.
+- The way a real prospect would type into ChatGPT / Perplexity / Gemini.
+- Each query is a standalone search-style request.
+- Vary surface form: questions, imperative requests, fragment queries.
+- Match the language of the brand's primary market.
+
+DO NOT
+- Do not name the target brand.
+- Do not name any competitor, vendor, product, or company of any kind.
+- Do not invent offerings the brand does not provide.
+- Do not generate concept-only or definitional queries ("how does X work", "history of X", "tax implications of X").
+- Do not output duplicates or near-duplicates.`;
 
 export interface GeneratePromptsResult {
   prompts: string[];
   systemPrompt: string;
   userMessage: string;
+}
+
+export function buildUserMessage(context: BrandContext, n: number): string {
+  return `Generate ${n} vendor-citable search queries for this brand's specific market.
+
+Brand context:
+- category: ${context.category ?? "(unknown)"}
+- specific offerings: ${context.specific_offerings ?? "(unknown)"}
+- target audience: ${context.target_audience ?? "(unknown)"}
+- primary geography: ${context.primary_geography ?? "(unknown)"}
+- positioning: ${context.positioning ?? "(unknown)"}
+
+Constraints:
+- Stay strictly inside the named category and offerings — do not drift to the parent industry or adjacent geographies.
+- Apply the intent mix from the system prompt (~40% recommendation, ~25% open-enumeration comparison, ~20% procurement, ~15% problem-solving).
+- Never name any vendor, brand, product, or company in any query.
+- Return exactly ${n} prompts in the JSON array.`;
 }
 
 export async function generatePrompts(
@@ -34,15 +82,7 @@ export async function generatePrompts(
     tracking: ChatTrackingHeaders;
   },
 ): Promise<GeneratePromptsResult> {
-  const message = `Generate ${n} short user-style search queries for someone in this brand's category.
-
-Brand context:
-- industry: ${context.industry ?? "(unknown)"}
-- target audience: ${context.target_audience ?? "(unknown)"}
-- offerings: ${context.offerings ?? "(unknown)"}
-- geography: ${context.geography ?? "(unknown)"}
-
-Return JSON with exactly ${n} prompts.`;
+  const message = buildUserMessage(context, n);
 
   const result = await chatComplete(
     {
@@ -67,4 +107,3 @@ Return JSON with exactly ${n} prompts.`;
   }
   return { prompts: cleaned.slice(0, n), systemPrompt: SYSTEM_PROMPT, userMessage: message };
 }
-
