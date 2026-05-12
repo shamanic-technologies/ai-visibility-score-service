@@ -96,7 +96,11 @@ async function persistFailedAggregateRun(
   try {
     await db.insert(visibilityScoreRuns).values({
       orgId: opts.orgId,
+      userId: opts.userId ?? null,
       brandId: opts.brandId,
+      campaignId: opts.campaignId ?? null,
+      featureSlug: opts.featureSlug ?? null,
+      workflowSlug: opts.workflowSlug ?? null,
       parentRunId: opts.parentRunId ?? null,
       runId: opts.runId,
       aggregateRunId: null,
@@ -313,7 +317,11 @@ async function runVisibilityScoreInner(
       .insert(visibilityScoreRuns)
       .values({
         orgId: opts.orgId,
+        userId: opts.userId ?? null,
         brandId: opts.brandId,
+        campaignId: opts.campaignId ?? null,
+        featureSlug: opts.featureSlug ?? null,
+        workflowSlug: opts.workflowSlug ?? null,
         parentRunId: opts.parentRunId ?? null,
         runId: opts.runId,
         aggregateRunId: null,
@@ -368,7 +376,11 @@ async function runVisibilityScoreInner(
         .insert(visibilityScoreRuns)
         .values({
           orgId: opts.orgId,
+          userId: opts.userId ?? null,
           brandId: opts.brandId,
+          campaignId: opts.campaignId ?? null,
+          featureSlug: opts.featureSlug ?? null,
+          workflowSlug: opts.workflowSlug ?? null,
           parentRunId: opts.parentRunId ?? null,
           runId: opts.runId,
           aggregateRunId: parentRow.id,
