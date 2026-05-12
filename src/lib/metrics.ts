@@ -21,6 +21,10 @@ export interface ExtractedCompetitor {
 export interface ExtractedPrompt {
   promptIndex: number;
   promptText: string;
+  judgeSystemPrompt: string;
+  judgeUserMessage: string;
+  extractorSystemPrompt: string;
+  extractorUserMessage: string;
   responseText: string;
   responseLengthChars: number;
   brandFound: boolean;

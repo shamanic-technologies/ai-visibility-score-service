@@ -28,7 +28,7 @@ export const ExtractionResultSchema = z.object({
 
 export type ExtractionResult = z.infer<typeof ExtractionResultSchema>;
 
-const SYSTEM_PROMPT = `You analyze an LLM response for brand visibility metrics.
+export const SYSTEM_PROMPT = `You analyze an LLM response for brand visibility metrics.
 
 Given a target brand (name + domain) and an LLM response, return STRICT JSON matching:
 
@@ -69,7 +69,13 @@ export interface ExtractParams {
   tracking: ChatTrackingHeaders;
 }
 
-export async function extractFromResponse(params: ExtractParams): Promise<ExtractionResult> {
+export interface ExtractFromResponseResult {
+  extraction: ExtractionResult;
+  systemPrompt: string;
+  userMessage: string;
+}
+
+export async function extractFromResponse(params: ExtractParams): Promise<ExtractFromResponseResult> {
   const message = `Target brand:
 - name: ${params.brandName}
 - domain: ${params.domain}
@@ -92,6 +98,7 @@ ${params.responseText}
   );
 
   const raw = result.json ?? safeParseJson(result.content, "extractor");
-  return ExtractionResultSchema.parse(raw);
+  const extraction = ExtractionResultSchema.parse(raw);
+  return { extraction, systemPrompt: SYSTEM_PROMPT, userMessage: message };
 }
 

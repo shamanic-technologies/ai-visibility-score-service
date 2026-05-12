@@ -29,15 +29,21 @@ describe("generatePrompts", () => {
         }),
     });
 
-    const { generatePrompts } = await import("../../src/lib/prompt-gen.js");
+    const { generatePrompts, SYSTEM_PROMPT } = await import("../../src/lib/prompt-gen.js");
     const out = await generatePrompts(
       { industry: "saas", target_audience: "founders", offerings: "crm", geography: "us" },
       5,
       { provider: "google", model: "flash", tracking },
     );
 
-    expect(out).toEqual(prompts);
-    expect(out).toHaveLength(5);
+    expect(out.prompts).toEqual(prompts);
+    expect(out.prompts).toHaveLength(5);
+    expect(out.systemPrompt).toBe(SYSTEM_PROMPT);
+    expect(out.userMessage).toContain("Brand context:");
+    expect(out.userMessage).toContain("industry: saas");
+    expect(out.userMessage).toContain("target audience: founders");
+    expect(out.userMessage).toContain("offerings: crm");
+    expect(out.userMessage).toContain("geography: us");
   });
 
   it("throws if model returns fewer prompts than requested", async () => {
@@ -75,7 +81,7 @@ describe("generatePrompts", () => {
 
     const { generatePrompts } = await import("../../src/lib/prompt-gen.js");
     const out = await generatePrompts({}, 3, { provider: "google", model: "flash", tracking });
-    expect(out).toEqual(prompts);
+    expect(out.prompts).toEqual(prompts);
   });
 
   it("forwards `provider` to chat-service (anthropic + sonnet does not get routed to google)", async () => {
