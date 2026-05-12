@@ -166,19 +166,18 @@ describe("aggregate metrics — handcrafted 3-prompt fixture", () => {
     expect(m.top_competitors[0].mention_count).toBe(3);
   });
 
-  it("visibility_score formula matches spec", () => {
+  it("visibility_score formula matches spec (decimal 0–1 scale)", () => {
     // br=2/3, cit=2/3, pos=0.875, sov=2/9, sent=(0+1)/2=0.5, brAndUrl=2/3
     const expected =
-      100 *
-      (0.25 * (2 / 3) +
-        0.15 * (2 / 3) +
-        0.2 * 0.875 +
-        0.2 * (2 / 9) +
-        0.15 * 0.5 +
-        0.05 * (2 / 3));
+      0.25 * (2 / 3) +
+      0.15 * (2 / 3) +
+      0.2 * 0.875 +
+      0.2 * (2 / 9) +
+      0.15 * 0.5 +
+      0.05 * (2 / 3);
     expect(m.visibility_score).toBeCloseTo(expected);
     expect(m.visibility_score).toBeGreaterThanOrEqual(0);
-    expect(m.visibility_score).toBeLessThanOrEqual(100);
+    expect(m.visibility_score).toBeLessThanOrEqual(1);
   });
 });
 
@@ -199,7 +198,7 @@ describe("edge cases", () => {
     expect(m.avg_position).toBeNull();
   });
 
-  it("visibility_score clamped to [0, 100] even with extreme weights", () => {
+  it("visibility_score clamped to [0, 1] even with extreme weights", () => {
     const huge = {
       brandMentionRate: 99,
       citationRate: 99,
@@ -223,7 +222,20 @@ describe("edge cases", () => {
       "acme.com",
       huge,
     );
-    expect(m.visibility_score).toBe(100);
+    expect(m.visibility_score).toBe(1);
+  });
+
+  it("visibility_score is in [0, 1] for default weights regardless of input", () => {
+    const inputs: ExtractedPrompt[][] = [
+      [p({})],
+      [p({ brandFound: true, brandPosition: 1, maxBrandsInResponse: 1, sentiment: "positive" })],
+      [p({ brandFound: true, brandPosition: 1, maxBrandsInResponse: 1, sentiment: "negative" })],
+    ];
+    for (const ps of inputs) {
+      const m = aggregate(ps, "acme.com", DEFAULT_WEIGHTS);
+      expect(m.visibility_score).toBeGreaterThanOrEqual(0);
+      expect(m.visibility_score).toBeLessThanOrEqual(1);
+    }
   });
 
   it("citation_share_of_voice returns 0 when no citations", () => {
@@ -242,7 +254,7 @@ describe("edge cases", () => {
     // With redistribution, the 0.20 weight is spread to other components
     // brand_mention_rate = 1.0, other metrics compute normally
     // Score should be higher than if positionScore weight was wasted at 0
-    const wastedScore = 100 * (0.25 * 1.0 + 0.15 * 0 + 0.20 * 0 + 0.20 * 1.0 + 0.15 * 1.0 + 0.05 * 0);
+    const wastedScore = 0.25 * 1.0 + 0.15 * 0 + 0.20 * 0 + 0.20 * 1.0 + 0.15 * 1.0 + 0.05 * 0;
     expect(m.visibility_score).toBeGreaterThan(wastedScore);
   });
 });

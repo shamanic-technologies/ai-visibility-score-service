@@ -249,14 +249,13 @@ export function aggregate(
   }
 
   const raw =
-    100 *
-    (effectiveWeights.brandMentionRate * brand_mention_rate +
-      effectiveWeights.citationRate * citation_rate +
-      effectiveWeights.positionScore * (position_score ?? 0) +
-      effectiveWeights.shareOfVoice * share_of_voice +
-      effectiveWeights.sentiment * sentimentNormalized +
-      effectiveWeights.brandAndUrlRate * brand_and_url_rate);
-  const visibility_score = Math.max(0, Math.min(100, raw));
+    effectiveWeights.brandMentionRate * brand_mention_rate +
+    effectiveWeights.citationRate * citation_rate +
+    effectiveWeights.positionScore * (position_score ?? 0) +
+    effectiveWeights.shareOfVoice * share_of_voice +
+    effectiveWeights.sentiment * sentimentNormalized +
+    effectiveWeights.brandAndUrlRate * brand_and_url_rate;
+  const visibility_score = Math.max(0, Math.min(1, raw));
 
   return {
     brand_mention_count,

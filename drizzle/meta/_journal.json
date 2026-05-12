@@ -15,6 +15,13 @@
       "when": 1778503062378,
       "tag": "0001_nullable_domain_brandname",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1778561380479,
+      "tag": "0002_visibility_score_decimal_scale",
+      "breakpoints": true
     }
   ]
 }

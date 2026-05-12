@@ -151,27 +151,33 @@
           },
           "visibilityScore": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "Composite score, decimal 0–1 (clamped). Multiply by 100 for percentage display."
           },
           "brandMentionRate": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "Fraction of prompts that mentioned the brand. Decimal 0–1."
           },
           "shareOfVoice": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "Brand mentions / (brand + competitor mentions). Decimal 0–1."
           },
           "netSentiment": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "(positive - negative) / brand_mention_count. Decimal in [-1, 1]."
           },
           "citationRate": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "Citations of the brand domain / N prompts. Decimal 0–1."
           },
           "avgPosition": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "Mean rank of brand among mentions in responses (1 = first). Lower is better."
           },
           "status": {
             "type": "string"
