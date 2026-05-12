@@ -115,33 +115,56 @@ Default weights: `0.25 / 0.15 / 0.20 / 0.20 / 0.15 / 0.05` (sums to 1.0).
 
 ## Pipeline (per brand)
 
+The service audits each brand against **multiple judge LLMs in parallel** and persists
+an aggregate result on top of the per-judge results. The set of judges is decided
+server-side in `src/lib/config.ts` (today: `google/pro` + `anthropic/opus`).
+
 ```
 brandId
   └─► brand-service POST /orgs/brands/extract-fields  (industry, audience, offerings, geography)
         │
         ▼
   prompt-gen → chat-service POST /complete (google/flash, JSON)  → N user-style queries
+        │   (prompts are generated ONCE and shared across every judge)
+        ▼
+  for each judge in config.judges (parallel):
+    for each query (concurrency 5):
+      chat-service POST /complete (judge.provider/judge.model)   → response, tokens, latency
+      chat-service POST /complete (google/flash, JSON)           → structured extraction
+    metrics.ts :: aggregate(prompts, domain, weights)            → per-judge AggregateMetrics
         │
         ▼
-  for each query (concurrency 5):
-    chat-service POST /complete (google/pro)         → response, tokens, latency
-    chat-service POST /complete (anthropic/haiku, JSON) → structured extraction
-        │
-        ▼
-  metrics.ts :: aggregate(prompts, domain, weights)
+  metrics.ts :: aggregateAcrossProviders(perJudge[])             → aggregate AggregateMetrics
         │
         ▼
   TX:
-    INSERT visibility_score_runs        (1 row)
-    INSERT visibility_score_prompts     (N rows)
-    INSERT visibility_score_competitors (M rows)
+    INSERT visibility_score_runs        (1 aggregate parent row, aggregate_run_id=NULL)
+    for each judge:
+      INSERT visibility_score_runs      (1 per-provider child row, aggregate_run_id=parent.id)
+      INSERT visibility_score_prompts   (N rows tied to the child run)
+      INSERT visibility_score_competitors (M rows tied to the child run + prompt)
         │
         ▼
-  return { run, prompts, competitors, top_competitors, citation_opportunities }
+  return { run (parent), by_provider[], top_competitors, citation_opportunities }
 ```
 
-Multiple brands → N runs in parallel via `Promise.allSettled`. Partial failure returns
-the successful results plus a 200; total failure returns 500.
+Aggregation rules:
+
+- Rate metrics (`visibility_score`, `share_of_voice`, `brand_mention_rate`, ...) on the
+  parent row are the **arithmetic mean** of the per-judge values. Nullable rates skip
+  null children and average the rest; if all children are null, the parent is null.
+- Count metrics (`brand_mention_count`, `citation_count`, ...) are **summed** across judges.
+- `top_competitors` and `citation_opportunities` are unioned across judges (by competitor
+  name / domain) with mention counts summed.
+
+Failure semantics:
+
+- If a single judge fails, the audit still succeeds: the parent row is persisted with
+  the aggregate of the surviving judges and `error` records `"partial: <provider> failed: <msg>"`.
+- If ALL judges fail, the audit fails: HTTP 500 + a failed aggregate parent row.
+
+Adding a new judge (e.g. OpenAI) requires only appending to `VISIBILITY_RUN_CONFIG.judges`
+— no schema or API change.
 
 ## Run tracking
 
@@ -158,11 +181,18 @@ the successful results plus a 200; total failure returns 500.
 
 Three tables, all with `org_id` for tenant isolation:
 
-- `visibility_score_runs` — one row per (brand × audit attempt). Holds all aggregate
-  metrics plus status / timing. Successful runs have `status='completed'` with all
-  metrics populated; failed runs have `status='failed'` with `error` set and metric
-  columns null (`domain` and `brand_name` may also be null if the pipeline failed
-  before brand-service resolved).
+- `visibility_score_runs` — one row per (brand × audit attempt × judge), plus one
+  aggregate parent row per audit. The two row kinds are distinguished by
+  `judge_kind`:
+  - `judge_kind = 'aggregate'` (`aggregate_run_id IS NULL`): aggregate parent row.
+    Metrics are the mean across all per-provider children. `llm_provider = 'aggregate'`,
+    `llm_model` is the comma-separated list of judges (e.g. `google/pro,anthropic/opus`).
+  - `judge_kind = 'per_provider'` (`aggregate_run_id = <parent id>`): one row per judge.
+    `llm_provider` / `llm_model` hold the actual judge. Linked to its prompts /
+    competitors via `visibility_score_prompts.run_id_fk = <this row's id>`.
+  Successful runs have `status='completed'` with all metrics populated; failed runs
+  have `status='failed'` with `error` set and metric columns null (`domain` and
+  `brand_name` may also be null if the pipeline failed before brand-service resolved).
 - `visibility_score_prompts` — `nPrompts` rows per run. Per-prompt response + extraction.
 - `visibility_score_competitors` — one row per competitor mention per prompt.
 

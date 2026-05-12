@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { aggregate, DEFAULT_WEIGHTS, type ExtractedPrompt } from "../../src/lib/metrics.js";
+import {
+  aggregate,
+  aggregateAcrossProviders,
+  DEFAULT_WEIGHTS,
+  type AggregateMetrics,
+  type ExtractedPrompt,
+} from "../../src/lib/metrics.js";
 
 function p(overrides: Partial<ExtractedPrompt>, idx = 0): ExtractedPrompt {
   return {
@@ -256,5 +262,122 @@ describe("edge cases", () => {
     // Score should be higher than if positionScore weight was wasted at 0
     const wastedScore = 0.25 * 1.0 + 0.15 * 0 + 0.20 * 0 + 0.20 * 1.0 + 0.15 * 1.0 + 0.05 * 0;
     expect(m.visibility_score).toBeGreaterThan(wastedScore);
+  });
+});
+
+describe("aggregateAcrossProviders", () => {
+  function judge(overrides: Partial<AggregateMetrics>): AggregateMetrics {
+    return {
+      brand_mention_count: 5,
+      brand_mention_rate: 0.5,
+      url_mention_count: 2,
+      url_mention_rate: 0.2,
+      brand_and_url_count: 1,
+      brand_and_url_rate: 0.1,
+      avg_position: 2,
+      position_score: 0.7,
+      share_of_voice: 0.3,
+      weighted_share_of_voice: 0.4,
+      citation_count: 3,
+      citation_rate: 0.3,
+      citation_share_of_voice: 0.2,
+      citation_opportunities: [],
+      positive_count: 3,
+      neutral_count: 1,
+      negative_count: 1,
+      net_sentiment: 0.4,
+      avg_sentiment_score: 0.5,
+      avg_response_length: 200,
+      response_length_when_brand_found: 220,
+      response_length_when_brand_not_found: 180,
+      distinct_competitors_count: 4,
+      top_competitors: [],
+      visibility_score: 0.5,
+      ...overrides,
+    };
+  }
+
+  it("rates: arithmetic mean across judges", () => {
+    const result = aggregateAcrossProviders([
+      judge({ visibility_score: 0.4, share_of_voice: 0.2 }),
+      judge({ visibility_score: 0.6, share_of_voice: 0.4 }),
+    ]);
+    expect(result.visibility_score).toBeCloseTo(0.5);
+    expect(result.share_of_voice).toBeCloseTo(0.3);
+  });
+
+  it("counts: sum across judges (not averaged)", () => {
+    const result = aggregateAcrossProviders([
+      judge({ brand_mention_count: 4, citation_count: 2 }),
+      judge({ brand_mention_count: 6, citation_count: 3 }),
+    ]);
+    expect(result.brand_mention_count).toBe(10);
+    expect(result.citation_count).toBe(5);
+  });
+
+  it("nullable rate: stays null when all children are null", () => {
+    const result = aggregateAcrossProviders([
+      judge({ position_score: null, avg_position: null }),
+      judge({ position_score: null, avg_position: null }),
+    ]);
+    expect(result.position_score).toBeNull();
+    expect(result.avg_position).toBeNull();
+  });
+
+  it("nullable rate: skips null and means non-null when mixed", () => {
+    const result = aggregateAcrossProviders([
+      judge({ position_score: 0.8 }),
+      judge({ position_score: null }),
+    ]);
+    expect(result.position_score).toBeCloseTo(0.8);
+  });
+
+  it("top_competitors merged across judges by name, mention_count summed", () => {
+    const result = aggregateAcrossProviders([
+      judge({
+        top_competitors: [
+          { name: "b", url: null, mention_count: 3, avg_position: 2, share_of_voice: 0.1, net_sentiment: 0 },
+        ],
+      }),
+      judge({
+        top_competitors: [
+          { name: "b", url: "https://b.com", mention_count: 2, avg_position: 1, share_of_voice: 0.2, net_sentiment: 0.5 },
+          { name: "c", url: null, mention_count: 1, avg_position: 3, share_of_voice: 0.05, net_sentiment: 0 },
+        ],
+      }),
+    ]);
+    const b = result.top_competitors.find((c) => c.name.toLowerCase() === "b")!;
+    expect(b.mention_count).toBe(5);
+    expect(b.url).toBe("https://b.com");
+    expect(result.distinct_competitors_count).toBe(2);
+  });
+
+  it("citation_opportunities merged by domain, count summed", () => {
+    const result = aggregateAcrossProviders([
+      judge({ citation_opportunities: [{ domain: "x.com", count: 2 }] }),
+      judge({
+        citation_opportunities: [
+          { domain: "x.com", count: 1 },
+          { domain: "y.com", count: 5 },
+        ],
+      }),
+    ]);
+    expect(result.citation_opportunities).toEqual([
+      { domain: "y.com", count: 5 },
+      { domain: "x.com", count: 3 },
+    ]);
+  });
+
+  it("throws on empty input (fail loud, no silent default)", () => {
+    expect(() => aggregateAcrossProviders([])).toThrow(/at least one judge result/);
+  });
+
+  it("aggregate visibility_score stays within [0, 1]", () => {
+    const result = aggregateAcrossProviders([
+      judge({ visibility_score: 0 }),
+      judge({ visibility_score: 1 }),
+    ]);
+    expect(result.visibility_score).toBeGreaterThanOrEqual(0);
+    expect(result.visibility_score).toBeLessThanOrEqual(1);
   });
 });
