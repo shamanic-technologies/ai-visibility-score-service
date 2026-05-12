@@ -249,6 +249,45 @@ describe("edge cases", () => {
     expect(m.citation_share_of_voice).toBe(0);
   });
 
+  it("visibility_score is 0 when brand has zero mentions across all prompts", () => {
+    // No prompt has brandFound: true. Without the fix, sentimentNormalized = (0 + 1) / 2 = 0.5
+    // contributes a baseline ~9.4% via the (redistributed) sentiment weight, which is wrong —
+    // sentiment is meaningless when the brand is never mentioned.
+    const ps = [
+      p({ brandFound: false, competitors: [{ name: "B", url: null, position: 1, sentiment: "positive", sentimentScore: 0.5, citationUrl: null }] }),
+      p({ brandFound: false, competitors: [{ name: "C", url: null, position: 1, sentiment: "neutral", sentimentScore: 0, citationUrl: null }] }),
+    ];
+    const m = aggregate(ps, "acme.com", DEFAULT_WEIGHTS);
+    expect(m.brand_mention_count).toBe(0);
+    expect(m.visibility_score).toBe(0);
+  });
+
+  it("sentiment weight is redistributed (not zeroed) when brand has zero mentions", () => {
+    // With zero mentions: all six signals null/zero. visibility_score = 0 regardless of weights.
+    const ps = [p({ brandFound: false })];
+    const m = aggregate(ps, "acme.com", DEFAULT_WEIGHTS);
+    expect(m.visibility_score).toBe(0);
+  });
+
+  it("sentiment still contributes via (net_sentiment+1)/2 when brand has at least one mention", () => {
+    // Single positive mention at position 1 of 1, no citations, no url, no competitors.
+    // brand_mention_rate=1, citation_rate=0, position_score=1, share_of_voice=1,
+    // sentimentNormalized=(1+1)/2=1, brand_and_url_rate=0
+    // visibility = 0.25*1 + 0.15*0 + 0.2*1 + 0.2*1 + 0.15*1 + 0.05*0 = 0.80
+    const ps = [
+      p({
+        brandFound: true,
+        brandCount: 1,
+        brandPosition: 1,
+        maxBrandsInResponse: 1,
+        sentiment: "positive",
+        sentimentScore: 1,
+      }),
+    ];
+    const m = aggregate(ps, "acme.com", DEFAULT_WEIGHTS);
+    expect(m.visibility_score).toBeCloseTo(0.8);
+  });
+
   it("redistributes positionScore weight when position_score is null (brand found, position unknown)", () => {
     // Brand found but brandPosition always null → position_score is null
     const ps = [
