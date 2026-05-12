@@ -146,13 +146,15 @@ describe("happy path POST /orgs/visibility-score-runs", () => {
         brandId,
         parentRunId: PARENT_RUN,
         runId: SVC_RUN,
+        aggregateRunId: null,
+        judgeKind: "aggregate" as const,
         domain: "acme.com",
         brandName: "Acme",
-        llmProvider: "google",
-        llmModel: "pro",
+        llmProvider: "aggregate",
+        llmModel: "google/pro,anthropic/opus",
         promptGenModel: "flash",
-        extractionProvider: "anthropic",
-        extractionModel: "haiku",
+        extractionProvider: "google",
+        extractionModel: "flash",
         nPrompts: 25,
         weights: {
           brandMentionRate: 0.25,
@@ -191,8 +193,7 @@ describe("happy path POST /orgs/visibility-score-runs", () => {
         completedAt: new Date(),
         createdAt: new Date(),
       },
-      prompts: [],
-      competitors: [],
+      byProvider: [],
       metrics: {
         brand_mention_count: 10,
         brand_mention_rate: 0.4,
@@ -218,7 +219,7 @@ describe("happy path POST /orgs/visibility-score-runs", () => {
         response_length_when_brand_not_found: 280,
         distinct_competitors_count: 12,
         top_competitors: [],
-        visibility_score: 47.5,
+        visibility_score: 0.475,
       },
     };
   }
@@ -243,14 +244,47 @@ describe("happy path POST /orgs/visibility-score-runs", () => {
       .send({});
 
     const callArg = vi.mocked(runVisibilityScore).mock.calls[0][0];
-    expect(callArg.provider).toBe("google");
-    expect(callArg.promptModel).toBe("pro");
+    expect(callArg.judges).toEqual([
+      { provider: "google", model: "pro" },
+      { provider: "anthropic", model: "opus" },
+    ]);
     expect(callArg.promptGenProvider).toBe("google");
     expect(callArg.promptGenModel).toBe("flash");
-    expect(callArg.extractionProvider).toBe("anthropic");
-    expect(callArg.extractionModel).toBe("haiku");
+    expect(callArg.extractionProvider).toBe("google");
+    expect(callArg.extractionModel).toBe("flash");
     expect(callArg.nPrompts).toBe(25);
     expect(callArg.brandId).toBe(BRAND_ID_1);
+  });
+
+  it("returns by_provider array with one entry per configured judge", async () => {
+    const fr = fakeResult(BRAND_ID_1);
+    (fr as any).byProvider = [
+      {
+        judge: { provider: "google", model: "pro" },
+        run: { ...fr.run, id: "child-google", aggregateRunId: fr.run.id, judgeKind: "per_provider" as const, llmProvider: "google", llmModel: "pro" },
+        prompts: [],
+        competitors: [],
+        metrics: { ...fr.metrics, top_competitors: [], citation_opportunities: [] },
+      },
+      {
+        judge: { provider: "anthropic", model: "opus" },
+        run: { ...fr.run, id: "child-opus", aggregateRunId: fr.run.id, judgeKind: "per_provider" as const, llmProvider: "anthropic", llmModel: "opus" },
+        prompts: [],
+        competitors: [],
+        metrics: { ...fr.metrics, top_competitors: [], citation_opportunities: [] },
+      },
+    ];
+    vi.mocked(runVisibilityScore).mockResolvedValueOnce(fr as any);
+    const res = await request(createApp())
+      .post("/orgs/visibility-score-runs")
+      .set(authHeaders({ "x-brand-id": BRAND_ID_1 }))
+      .send({});
+    expect(res.status).toBe(200);
+    expect(res.body.results[0].by_provider).toHaveLength(2);
+    expect(res.body.results[0].by_provider[0].provider).toBe("google");
+    expect(res.body.results[0].by_provider[0].model).toBe("pro");
+    expect(res.body.results[0].by_provider[1].provider).toBe("anthropic");
+    expect(res.body.results[0].by_provider[1].model).toBe("opus");
   });
 
   it("rejects multi-brand x-brand-id header with 400", async () => {
@@ -301,13 +335,15 @@ describe("GET /orgs/visibility-score-runs (list)", () => {
         brandId: BRAND_ID_1,
         parentRunId: PARENT_RUN,
         runId: SVC_RUN,
+        aggregateRunId: null,
+        judgeKind: "aggregate" as const,
         domain: "acme.com",
         brandName: "Acme",
-        llmProvider: "google",
-        llmModel: "pro",
+        llmProvider: "aggregate",
+        llmModel: "google/pro,anthropic/opus",
         promptGenModel: "flash",
-        extractionProvider: "anthropic",
-        extractionModel: "haiku",
+        extractionProvider: "google",
+        extractionModel: "flash",
         nPrompts: 25,
         weights: {
           brandMentionRate: 0.25,
@@ -339,7 +375,7 @@ describe("GET /orgs/visibility-score-runs (list)", () => {
         responseLengthWhenBrandFound: 320,
         responseLengthWhenBrandNotFound: 280,
         distinctCompetitorsCount: 12,
-        visibilityScore: "47.50",
+        visibilityScore: "0.4750",
         status: "completed" as const,
         error: null,
         startedAt: now,
@@ -386,66 +422,81 @@ describe("GET /orgs/visibility-score-runs/:id", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns run detail with prompts and competitors", async () => {
+  it("returns aggregate run + by_provider array", async () => {
     const now = new Date();
-    const RUN_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const PARENT_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const CHILD_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
     const PROMPT_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 
-    const fakeRun = {
-      id: RUN_ID,
-      orgId: ORG_ID,
-      brandId: BRAND_ID_1,
-      parentRunId: PARENT_RUN,
-      runId: SVC_RUN,
-      domain: "acme.com",
-      brandName: "Acme",
+    function makeRun(overrides: Record<string, unknown>) {
+      return {
+        id: PARENT_ID,
+        orgId: ORG_ID,
+        brandId: BRAND_ID_1,
+        parentRunId: PARENT_RUN,
+        runId: SVC_RUN,
+        aggregateRunId: null,
+        judgeKind: "aggregate",
+        domain: "acme.com",
+        brandName: "Acme",
+        llmProvider: "aggregate",
+        llmModel: "google/pro,anthropic/opus",
+        promptGenModel: "flash",
+        extractionProvider: "google",
+        extractionModel: "flash",
+        nPrompts: 1,
+        weights: {
+          brandMentionRate: 0.25,
+          citationRate: 0.15,
+          positionScore: 0.2,
+          shareOfVoice: 0.2,
+          sentiment: 0.15,
+          brandAndUrlRate: 0.05,
+        },
+        brandMentionCount: 1,
+        brandMentionRate: "1.0000",
+        urlMentionCount: 0,
+        urlMentionRate: "0.0000",
+        brandAndUrlCount: 0,
+        brandAndUrlRate: "0.0000",
+        avgPosition: "1.00",
+        positionScore: "1.0000",
+        shareOfVoice: "1.0000",
+        weightedShareOfVoice: "1.0000",
+        citationCount: 0,
+        citationRate: "0.0000",
+        citationShareOfVoice: "0.0000",
+        positiveCount: 1,
+        neutralCount: 0,
+        negativeCount: 0,
+        netSentiment: "1.0000",
+        avgSentimentScore: "0.8000",
+        avgResponseLength: 200,
+        responseLengthWhenBrandFound: 200,
+        responseLengthWhenBrandNotFound: null,
+        distinctCompetitorsCount: 0,
+        visibilityScore: "0.8000",
+        status: "completed" as const,
+        error: null,
+        startedAt: now,
+        completedAt: now,
+        createdAt: now,
+        ...overrides,
+      };
+    }
+
+    const fakeParent = makeRun({});
+    const fakeChild = makeRun({
+      id: CHILD_ID,
+      aggregateRunId: PARENT_ID,
+      judgeKind: "per_provider",
       llmProvider: "google",
       llmModel: "pro",
-      promptGenModel: "flash",
-      extractionProvider: "anthropic",
-      extractionModel: "haiku",
-      nPrompts: 1,
-      weights: {
-        brandMentionRate: 0.25,
-        citationRate: 0.15,
-        positionScore: 0.2,
-        shareOfVoice: 0.2,
-        sentiment: 0.15,
-        brandAndUrlRate: 0.05,
-      },
-      brandMentionCount: 1,
-      brandMentionRate: "1.0000",
-      urlMentionCount: 0,
-      urlMentionRate: "0.0000",
-      brandAndUrlCount: 0,
-      brandAndUrlRate: "0.0000",
-      avgPosition: "1.00",
-      positionScore: "1.0000",
-      shareOfVoice: "1.0000",
-      weightedShareOfVoice: "1.0000",
-      citationCount: 0,
-      citationRate: "0.0000",
-      citationShareOfVoice: "0.0000",
-      positiveCount: 1,
-      neutralCount: 0,
-      negativeCount: 0,
-      netSentiment: "1.0000",
-      avgSentimentScore: "0.8000",
-      avgResponseLength: 200,
-      responseLengthWhenBrandFound: 200,
-      responseLengthWhenBrandNotFound: null,
-      distinctCompetitorsCount: 0,
-      visibilityScore: "80.00",
-      status: "completed" as const,
-      error: null,
-      startedAt: now,
-      completedAt: now,
-      createdAt: now,
-    };
+    });
 
     const fakePrompt = {
       id: PROMPT_ID,
-      runIdFk: RUN_ID,
+      runIdFk: CHILD_ID,
       orgId: ORG_ID,
       promptIndex: 0,
       promptText: "What is Acme?",
@@ -467,23 +518,24 @@ describe("GET /orgs/visibility-score-runs/:id", () => {
       createdAt: now,
     };
 
-    // The handler calls db.select() three times sequentially:
-    // 1. run lookup, 2. prompts, 3. competitors
+    // The handler now calls db.select() multiple times:
+    // 1. lookup requested row (parent), 2. lookup children, 3. child prompts, 4. child competitors
     let callCount = 0;
     vi.mocked(db.select).mockImplementation(() => {
       callCount++;
       if (callCount === 1) {
-        // run query: select().from().where()
-        const where = vi.fn().mockResolvedValue([fakeRun]);
+        const where = vi.fn().mockResolvedValue([fakeParent]);
         const from = vi.fn(() => ({ where }));
         return { from } as any;
       } else if (callCount === 2) {
-        // prompts query: select().from().where()
+        const where = vi.fn().mockResolvedValue([fakeChild]);
+        const from = vi.fn(() => ({ where }));
+        return { from } as any;
+      } else if (callCount === 3) {
         const where = vi.fn().mockResolvedValue([fakePrompt]);
         const from = vi.fn(() => ({ where }));
         return { from } as any;
       } else {
-        // competitors query: select().from().where()
         const where = vi.fn().mockResolvedValue([]);
         const from = vi.fn(() => ({ where }));
         return { from } as any;
@@ -491,17 +543,20 @@ describe("GET /orgs/visibility-score-runs/:id", () => {
     });
 
     const res = await request(createApp())
-      .get(`/orgs/visibility-score-runs/${RUN_ID}`)
+      .get(`/orgs/visibility-score-runs/${PARENT_ID}`)
       .set(authHeaders({ "x-brand-id": BRAND_ID_1 }));
 
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty("run");
-    expect(res.body).toHaveProperty("prompts");
-    expect(res.body).toHaveProperty("competitors");
+    expect(res.body).toHaveProperty("by_provider");
     expect(res.body).toHaveProperty("top_competitors");
     expect(res.body).toHaveProperty("citation_opportunities");
-    expect(res.body.run.id).toBe(RUN_ID);
-    expect(res.body.prompts).toHaveLength(1);
-    expect(res.body.prompts[0].promptText).toBe("What is Acme?");
+    expect(res.body.run.id).toBe(PARENT_ID);
+    expect(res.body.run.judgeKind).toBe("aggregate");
+    expect(res.body.by_provider).toHaveLength(1);
+    expect(res.body.by_provider[0].provider).toBe("google");
+    expect(res.body.by_provider[0].model).toBe("pro");
+    expect(res.body.by_provider[0].prompts).toHaveLength(1);
+    expect(res.body.by_provider[0].prompts[0].promptText).toBe("What is Acme?");
   });
 });

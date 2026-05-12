@@ -154,6 +154,12 @@ export const RunRowSchema = z
     brandId: z.string().uuid(),
     parentRunId: z.string().uuid().nullable(),
     runId: z.string().uuid().nullable(),
+    aggregateRunId: z.string().uuid().nullable().openapi({
+      description: "When non-null, this row is a per-provider child of the aggregate run with this id.",
+    }),
+    judgeKind: z.enum(["aggregate", "per_provider"]).openapi({
+      description: "`aggregate` = parent row, mean across providers. `per_provider` = single judge child row.",
+    }),
     domain: z.string(),
     brandName: z.string(),
     llmProvider: z.string(),
@@ -189,13 +195,32 @@ export const RunRowSchema = z
   .passthrough()
   .openapi("VisibilityScoreRunRow");
 
-export const RunResultSchema = z
+export const ByProviderResultSchema = z
   .object({
+    provider: z.string(),
+    model: z.string(),
     run: RunRowSchema,
     prompts: z.array(PromptDetailSchema),
     competitors: z.array(CompetitorDetailSchema),
     top_competitors: z.array(TopCompetitorSchema),
     citation_opportunities: z.array(CitationOpportunitySchema),
+  })
+  .openapi("VisibilityScoreByProviderResult");
+
+export const RunResultSchema = z
+  .object({
+    run: RunRowSchema.openapi({
+      description: "Aggregate parent row. Metrics are the mean across all judge providers.",
+    }),
+    by_provider: z.array(ByProviderResultSchema).openapi({
+      description: "One entry per judge provider in the run. Order matches the server config.",
+    }),
+    top_competitors: z.array(TopCompetitorSchema).openapi({
+      description: "Top competitors unioned across all judges (by competitor name).",
+    }),
+    citation_opportunities: z.array(CitationOpportunitySchema).openapi({
+      description: "Citation domains unioned across all judges.",
+    }),
   })
   .openapi("VisibilityScoreRunResult");
 

@@ -2,9 +2,13 @@ import type { ChatModel, ChatProvider } from "./chat-client.js";
 import { DEFAULT_WEIGHTS } from "./metrics.js";
 import type { VisibilityWeights } from "../db/schema.js";
 
-export interface VisibilityRunConfig {
+export interface JudgeConfig {
   provider: ChatProvider;
-  promptModel: ChatModel;
+  model: ChatModel;
+}
+
+export interface VisibilityRunConfig {
+  judges: JudgeConfig[];
   promptGenProvider: ChatProvider;
   promptGenModel: ChatModel;
   extractionProvider: ChatProvider;
@@ -14,12 +18,14 @@ export interface VisibilityRunConfig {
 }
 
 export const VISIBILITY_RUN_CONFIG: VisibilityRunConfig = {
-  provider: "google",
-  promptModel: "pro",
+  judges: [
+    { provider: "google", model: "pro" },
+    { provider: "anthropic", model: "opus" },
+  ],
   promptGenProvider: "google",
   promptGenModel: "flash",
-  extractionProvider: "anthropic",
-  extractionModel: "haiku",
+  extractionProvider: "google",
+  extractionModel: "flash",
   nPrompts: 25,
   weights: DEFAULT_WEIGHTS,
 };

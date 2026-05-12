@@ -8,6 +8,7 @@ import {
   jsonb,
   boolean,
   index,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 
 export const visibilityScoreRuns = pgTable(
@@ -18,6 +19,8 @@ export const visibilityScoreRuns = pgTable(
     brandId: uuid("brand_id").notNull(),
     parentRunId: uuid("parent_run_id"),
     runId: uuid("run_id"),
+    aggregateRunId: uuid("aggregate_run_id").references((): AnyPgColumn => visibilityScoreRuns.id, { onDelete: "cascade" }),
+    judgeKind: text("judge_kind").notNull().default("aggregate").$type<"aggregate" | "per_provider">(),
     domain: text("domain"),
     brandName: text("brand_name"),
     llmProvider: text("llm_provider").notNull(),
@@ -63,6 +66,7 @@ export const visibilityScoreRuns = pgTable(
     index("vsr_brand_id_idx").on(t.brandId),
     index("vsr_org_brand_created_idx").on(t.orgId, t.brandId, t.createdAt),
     index("vsr_domain_idx").on(t.domain),
+    index("vsr_aggregate_run_id_idx").on(t.aggregateRunId),
   ],
 );
 
