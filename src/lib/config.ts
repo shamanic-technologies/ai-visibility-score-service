@@ -25,7 +25,7 @@ export const VISIBILITY_RUN_CONFIG: VisibilityRunConfig = {
   promptGenProvider: "google",
   promptGenModel: "flash",
   extractionProvider: "google",
-  extractionModel: "flash",
+  extractionModel: "pro",
   nPrompts: 25,
   weights: DEFAULT_WEIGHTS,
 };

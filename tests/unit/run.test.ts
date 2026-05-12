@@ -45,7 +45,7 @@ const opts = {
   promptGenProvider: "google" as const,
   promptGenModel: "flash" as const,
   extractionProvider: "google" as const,
-  extractionModel: "flash" as const,
+  extractionModel: "pro" as const,
   nPrompts: 2,
   weights: {
     brandMentionRate: 0.25,

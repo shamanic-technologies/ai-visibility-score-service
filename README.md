@@ -11,7 +11,7 @@ A caller (dashboard, n8n workflow, etc.) sends a list of brand IDs, the service:
    using a small/fast model (`flash`).
 3. Runs each query against the audit model (default `google` / `pro`) in parallel.
 4. Extracts structured per-response data (brand found, position, sentiment, competitors,
-   citations) via `chat-service` using a strict-JSON model (default `anthropic` / `haiku`).
+   citations) via `chat-service` using a strict-JSON model (default `google` / `pro`).
 5. Aggregates the responses into a **visibility score (0–100)** plus a full metric bundle.
 6. Persists run + per-prompt + per-competitor rows.
 7. Returns the full bundle (run row + prompt rows + competitor rows + computed
@@ -130,7 +130,7 @@ brandId
   for each judge in config.judges (parallel):
     for each query (concurrency 5):
       chat-service POST /complete (judge.provider/judge.model)   → response, tokens, latency
-      chat-service POST /complete (google/flash, JSON)           → structured extraction
+      chat-service POST /complete (google/pro, JSON)             → structured extraction
     metrics.ts :: aggregate(prompts, domain, weights)            → per-judge AggregateMetrics
         │
         ▼
