@@ -265,11 +265,11 @@ describe("happy path POST /orgs/visibility-score-runs", () => {
 
     const callArg = vi.mocked(runVisibilityScore).mock.calls[0][0];
     expect(callArg.judges).toEqual([
-      { provider: "google", model: "pro" },
-      { provider: "anthropic", model: "opus" },
+      { provider: "google", model: "flash" },
+      { provider: "anthropic", model: "sonnet" },
     ]);
     expect(callArg.promptGenProvider).toBe("google");
-    expect(callArg.promptGenModel).toBe("flash");
+    expect(callArg.promptGenModel).toBe("pro");
     expect(callArg.extractionProvider).toBe("google");
     expect(callArg.extractionModel).toBe("pro");
     expect(callArg.nPrompts).toBe(25);
@@ -542,7 +542,7 @@ describe("GET /orgs/visibility-score-runs/:id", () => {
         distinctCompetitorsCount: 0,
         visibilityScore: "0.8000",
         promptGenSystemPrompt: "prompt-gen system prompt",
-        promptGenUserMessage: "prompt-gen user message with industry: saas",
+        promptGenUserMessage: "prompt-gen user message with category: saas",
         status: "completed" as const,
         error: null,
         startedAt: now,
@@ -644,6 +644,6 @@ describe("GET /orgs/visibility-score-runs/:id", () => {
     expect(promptRow.extractorUserMessage).toContain("domain: acme.com");
 
     expect(res.body.run.promptGenSystemPrompt).toBe("prompt-gen system prompt");
-    expect(res.body.run.promptGenUserMessage).toContain("industry: saas");
+    expect(res.body.run.promptGenUserMessage).toContain("category: saas");
   });
 });

@@ -43,6 +43,13 @@
       "when": 1778568402928,
       "tag": "0005_run_tracking_columns",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1778598964858,
+      "tag": "0006_prompt_cache",
+      "breakpoints": true
     }
   ]
 }
