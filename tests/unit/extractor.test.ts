@@ -35,7 +35,7 @@ describe("extractFromResponse", () => {
       json: () => Promise.resolve({ content: JSON.stringify(payload), tokensInput: 10, tokensOutput: 5, model: "haiku-1", json: payload }),
     });
 
-    const { extractFromResponse } = await import("../../src/lib/extractor.js");
+    const { extractFromResponse, SYSTEM_PROMPT } = await import("../../src/lib/extractor.js");
     const out = await extractFromResponse({
       responseText: "Acme is good",
       brandName: "Acme",
@@ -45,9 +45,14 @@ describe("extractFromResponse", () => {
       tracking,
     });
 
-    expect(out.brandFound).toBe(true);
-    expect(out.brandPosition).toBe(1);
-    expect(out.competitors).toHaveLength(1);
+    expect(out.extraction.brandFound).toBe(true);
+    expect(out.extraction.brandPosition).toBe(1);
+    expect(out.extraction.competitors).toHaveLength(1);
+    expect(out.systemPrompt).toBe(SYSTEM_PROMPT);
+    expect(out.userMessage).toContain("Target brand:");
+    expect(out.userMessage).toContain("name: Acme");
+    expect(out.userMessage).toContain("domain: acme.com");
+    expect(out.userMessage).toContain("Acme is good");
   });
 
   it("recovers from JSON wrapped in prose if `json` field absent", async () => {
@@ -83,7 +88,7 @@ describe("extractFromResponse", () => {
       model: "haiku",
       tracking,
     });
-    expect(out.brandFound).toBe(false);
+    expect(out.extraction.brandFound).toBe(false);
   });
 
   it("rejects when response fails the schema", async () => {

@@ -20,6 +20,8 @@ import type { JudgeConfig } from "./config.js";
 
 const PROMPT_CONCURRENCY = 5;
 
+export const JUDGE_SYSTEM_PROMPT = "You are a helpful assistant. Answer the user's question.";
+
 export interface RunOptions {
   brandId: string;
   orgId: string;
@@ -158,7 +160,7 @@ async function runJudge(
           const resp = await chatComplete(
             {
               message: promptText,
-              systemPrompt: "You are a helpful assistant. Answer the user's question.",
+              systemPrompt: JUDGE_SYSTEM_PROMPT,
               provider: judge.provider,
               model: judge.model,
             },
@@ -166,7 +168,7 @@ async function runJudge(
           );
           const latencyMs = Date.now() - t0;
 
-          const ext = await extractFromResponse({
+          const extResult = await extractFromResponse({
             responseText: resp.content,
             brandName,
             domain,
@@ -174,10 +176,15 @@ async function runJudge(
             model: opts.extractionModel,
             tracking: baseTracking,
           });
+          const ext = extResult.extraction;
 
           return {
             promptIndex: idx,
             promptText,
+            judgeSystemPrompt: JUDGE_SYSTEM_PROMPT,
+            judgeUserMessage: promptText,
+            extractorSystemPrompt: extResult.systemPrompt,
+            extractorUserMessage: extResult.userMessage,
             responseText: resp.content,
             responseLengthChars: resp.content.length,
             brandFound: ext.brandFound,
@@ -273,11 +280,12 @@ async function runVisibilityScoreInner(
   };
 
   // Generate prompts once; same prompts feed every judge for fair comparison.
-  const prompts = await generatePrompts(ctx, opts.nPrompts, {
+  const promptGen = await generatePrompts(ctx, opts.nPrompts, {
     provider: opts.promptGenProvider,
     model: opts.promptGenModel,
     tracking: baseTracking,
   });
+  const prompts = promptGen.prompts;
 
   // Run all judges in parallel.
   const judgeExecutions = await Promise.all(
@@ -342,6 +350,8 @@ async function runVisibilityScoreInner(
         responseLengthWhenBrandNotFound: aggregateMetrics.response_length_when_brand_not_found,
         distinctCompetitorsCount: aggregateMetrics.distinct_competitors_count,
         visibilityScore: dec(aggregateMetrics.visibility_score),
+        promptGenSystemPrompt: promptGen.systemPrompt,
+        promptGenUserMessage: promptGen.userMessage,
         status: "completed",
         error: aggregateError,
         startedAt,
@@ -395,6 +405,8 @@ async function runVisibilityScoreInner(
           responseLengthWhenBrandNotFound: m?.response_length_when_brand_not_found ?? null,
           distinctCompetitorsCount: m?.distinct_competitors_count ?? null,
           visibilityScore: m ? dec(m.visibility_score) : null,
+          promptGenSystemPrompt: promptGen.systemPrompt,
+          promptGenUserMessage: promptGen.userMessage,
           status: isOk ? "completed" : "failed",
           error: isOk ? null : exec.error.message,
           startedAt: exec.startedAt,
@@ -414,6 +426,10 @@ async function runVisibilityScoreInner(
               orgId: opts.orgId,
               promptIndex: p.promptIndex,
               promptText: p.promptText,
+              judgeSystemPrompt: p.judgeSystemPrompt,
+              judgeUserMessage: p.judgeUserMessage,
+              extractorSystemPrompt: p.extractorSystemPrompt,
+              extractorUserMessage: p.extractorUserMessage,
               responseText: p.responseText,
               responseLengthChars: p.responseLengthChars,
               brandFound: p.brandFound,

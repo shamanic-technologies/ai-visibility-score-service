@@ -92,7 +92,11 @@ afterEach(() => {
 describe("runVisibilityScore — failure persistence", () => {
   it("inserts a failed aggregate row when ALL judges fail", async () => {
     mockBrandSuccess();
-    vi.mocked(generatePrompts).mockResolvedValue(["q1", "q2"]);
+    vi.mocked(generatePrompts).mockResolvedValue({
+      prompts: ["q1", "q2"],
+      systemPrompt: "sys-pg",
+      userMessage: "user-pg",
+    });
     vi.mocked(chatComplete).mockResolvedValue({
       content: "answer",
       tokensInput: 1,
@@ -140,23 +144,31 @@ describe("runVisibilityScore — failure persistence", () => {
 
   it("does not call db.insert via the failure path on success (transaction handles it)", async () => {
     mockBrandSuccess();
-    vi.mocked(generatePrompts).mockResolvedValue(["q1", "q2"]);
+    vi.mocked(generatePrompts).mockResolvedValue({
+      prompts: ["q1", "q2"],
+      systemPrompt: "sys-pg",
+      userMessage: "user-pg",
+    });
     vi.mocked(chatComplete).mockResolvedValue({
       content: "answer",
       tokensInput: 1,
       tokensOutput: 1,
     });
     vi.mocked(extractFromResponse).mockResolvedValue({
-      brandFound: true,
-      brandCount: 1,
-      brandPosition: 1,
-      urlFound: false,
-      urlCount: 0,
-      maxBrandsInResponse: 1,
-      sentiment: "positive",
-      sentimentScore: 0.5,
-      citationUrls: [],
-      competitors: [],
+      extraction: {
+        brandFound: true,
+        brandCount: 1,
+        brandPosition: 1,
+        urlFound: false,
+        urlCount: 0,
+        maxBrandsInResponse: 1,
+        sentiment: "positive",
+        sentimentScore: 0.5,
+        citationUrls: [],
+        competitors: [],
+      },
+      systemPrompt: "sys-ext",
+      userMessage: "user-ext",
     });
 
     vi.mocked(db.transaction).mockResolvedValue({
