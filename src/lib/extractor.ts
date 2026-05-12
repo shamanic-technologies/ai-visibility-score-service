@@ -30,7 +30,7 @@ export type ExtractionResult = z.infer<typeof ExtractionResultSchema>;
 
 const SYSTEM_PROMPT = `You analyze an LLM response for brand visibility metrics.
 
-Given the target brand name + domain and the LLM response, extract structured data and return STRICT JSON only matching this exact schema:
+Given a target brand (name + domain) and an LLM response, return STRICT JSON matching:
 
 {
   "brandFound": boolean,
@@ -47,15 +47,16 @@ Given the target brand name + domain and the LLM response, extract structured da
   ]
 }
 
-Rules:
-- "brandFound" = true if the target brand is mentioned by name OR by its domain (treat both as the same brand).
-- "brandCount" = number of mentions of the target brand in the response.
-- "brandPosition" = ordinal in the list of brands mentioned in the response (1 = first brand mentioned). null if not found.
-- "urlFound" = true if the target domain (or any URL on that domain) appears.
-- "maxBrandsInResponse" = total distinct brands mentioned in the response (target + competitors).
-- "sentiment" + "sentimentScore" = sentiment toward the TARGET brand only. Score in [-1, +1] (-1 strongly negative, 0 neutral, +1 strongly positive). Default to "neutral" with sentimentScore 0 if brand not mentioned.
-- "citationUrls" = ALL URLs cited anywhere in the response (full URLs).
-- "competitors" = all OTHER brands mentioned (exclude target). For each competitor: position is its ordinal in the brands list (same numbering as target).
+For each field, answer the plain question:
+- brandFound: Is the target brand mentioned in the response? Use your judgment — a brand mention means the brand itself, not coincidental occurrences of common words that happen to be part of the brand name.
+- brandCount: How many times is the target brand mentioned?
+- brandPosition: Among the brands mentioned, what is the target brand's ordinal rank (1 = first)? null if not mentioned.
+- urlFound: Does any URL pointing to the target's domain appear in the response?
+- urlCount: How many such URLs?
+- maxBrandsInResponse: Total distinct brands mentioned (target + competitors).
+- sentiment / sentimentScore: Sentiment toward the target brand. Score in [-1, +1]. Neutral / 0 if not mentioned.
+- citationUrls: All URLs cited in the response.
+- competitors: All other brands mentioned.
 
 Output JSON only — no preamble, no markdown fence.`;
 
