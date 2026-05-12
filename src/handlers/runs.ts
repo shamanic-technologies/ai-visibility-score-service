@@ -242,6 +242,10 @@ export async function getRun(req: Request, res: Response): Promise<void> {
         .map((p) => ({
           promptIndex: p.promptIndex,
           promptText: p.promptText,
+          judgeSystemPrompt: p.judgeSystemPrompt ?? "",
+          judgeUserMessage: p.judgeUserMessage ?? "",
+          extractorSystemPrompt: p.extractorSystemPrompt ?? "",
+          extractorUserMessage: p.extractorUserMessage ?? "",
           responseText: p.responseText,
           responseLengthChars: p.responseLengthChars ?? p.responseText.length,
           brandFound: p.brandFound ?? false,

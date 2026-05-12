@@ -116,6 +116,20 @@ export const PromptDetailSchema = z
     id: z.string().uuid(),
     promptIndex: z.number(),
     promptText: z.string(),
+    judgeSystemPrompt: z.string().nullable().openapi({
+      description: "Exact system prompt string sent to the judge LLM. Persisted for full debug transparency.",
+    }),
+    judgeUserMessage: z.string().nullable().openapi({
+      description:
+        "Exact user message string sent to the judge LLM. Equals `promptText` (server does NOT inject brand context into the judge call).",
+    }),
+    extractorSystemPrompt: z.string().nullable().openapi({
+      description: "Exact system prompt string sent to the extractor LLM (the extractor analyzes the judge's output).",
+    }),
+    extractorUserMessage: z.string().nullable().openapi({
+      description:
+        "Exact user message string sent to the extractor LLM. Includes `Target brand: <name + domain>` + the judge response.",
+    }),
     responseText: z.string(),
     responseLengthChars: z.number().nullable(),
     brandFound: z.boolean().nullable(),
@@ -190,6 +204,14 @@ export const RunRowSchema = z
     }),
     avgPosition: z.string().nullable().openapi({
       description: "Mean rank of brand among mentions in responses (1 = first). Lower is better.",
+    }),
+    promptGenSystemPrompt: z.string().nullable().optional().openapi({
+      description:
+        "Exact system prompt string sent to the prompt-generator LLM (one call per run, drives the prompts the judges then answer).",
+    }),
+    promptGenUserMessage: z.string().nullable().optional().openapi({
+      description:
+        "Exact user message string sent to the prompt-generator LLM. Includes the brand context fields (industry, audience, offerings, geography) — these influence which prompts get generated.",
     }),
     status: z.string(),
     startedAt: z.string().nullable(),

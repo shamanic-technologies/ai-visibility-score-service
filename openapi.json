@@ -207,6 +207,16 @@
             "nullable": true,
             "description": "Mean rank of brand among mentions in responses (1 = first). Lower is better."
           },
+          "promptGenSystemPrompt": {
+            "type": "string",
+            "nullable": true,
+            "description": "Exact system prompt string sent to the prompt-generator LLM (one call per run, drives the prompts the judges then answer)."
+          },
+          "promptGenUserMessage": {
+            "type": "string",
+            "nullable": true,
+            "description": "Exact user message string sent to the prompt-generator LLM. Includes the brand context fields (industry, audience, offerings, geography) — these influence which prompts get generated."
+          },
           "status": {
             "type": "string"
           },
@@ -362,6 +372,26 @@
           "promptText": {
             "type": "string"
           },
+          "judgeSystemPrompt": {
+            "type": "string",
+            "nullable": true,
+            "description": "Exact system prompt string sent to the judge LLM. Persisted for full debug transparency."
+          },
+          "judgeUserMessage": {
+            "type": "string",
+            "nullable": true,
+            "description": "Exact user message string sent to the judge LLM. Equals `promptText` (server does NOT inject brand context into the judge call)."
+          },
+          "extractorSystemPrompt": {
+            "type": "string",
+            "nullable": true,
+            "description": "Exact system prompt string sent to the extractor LLM (the extractor analyzes the judge's output)."
+          },
+          "extractorUserMessage": {
+            "type": "string",
+            "nullable": true,
+            "description": "Exact user message string sent to the extractor LLM. Includes `Target brand: <name + domain>` + the judge response."
+          },
           "responseText": {
             "type": "string"
           },
@@ -429,6 +459,10 @@
           "id",
           "promptIndex",
           "promptText",
+          "judgeSystemPrompt",
+          "judgeUserMessage",
+          "extractorSystemPrompt",
+          "extractorUserMessage",
           "responseText",
           "responseLengthChars",
           "brandFound",

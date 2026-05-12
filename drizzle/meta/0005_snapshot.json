@@ -1,6 +1,6 @@
 {
-  "id": "ff7e24e8-219b-4ee2-b6e6-94b6183fccc3",
-  "prevId": "021d0456-9654-4eaf-9180-09335ba8ee71",
+  "id": "5f84561a-ae9a-4b0e-b5c8-2f25c9fb0a7e",
+  "prevId": "ff7e24e8-219b-4ee2-b6e6-94b6183fccc3",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -406,11 +406,35 @@
           "primaryKey": false,
           "notNull": true
         },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "brand_id": {
           "name": "brand_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": true
+        },
+        "campaign_id": {
+          "name": "campaign_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "feature_slug": {
+          "name": "feature_slug",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "workflow_slug": {
+          "name": "workflow_slug",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "parent_run_id": {
           "name": "parent_run_id",
@@ -751,6 +775,21 @@
           "columns": [
             {
               "expression": "aggregate_run_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "vsr_campaign_id_idx": {
+          "name": "vsr_campaign_id_idx",
+          "columns": [
+            {
+              "expression": "campaign_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

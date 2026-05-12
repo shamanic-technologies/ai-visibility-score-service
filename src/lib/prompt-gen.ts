@@ -8,7 +8,7 @@ export interface BrandContext {
   geography?: string;
 }
 
-const SYSTEM_PROMPT = `You generate plausible, user-style search queries for testing an LLM's brand visibility.
+export const SYSTEM_PROMPT = `You generate plausible, user-style search queries for testing an LLM's brand visibility.
 
 Return STRICT JSON shaped exactly as: {"prompts": ["query 1", "query 2", ...]}
 
@@ -19,6 +19,12 @@ Requirements for the queries:
 - Each query must be a standalone search-style question or request, not a paragraph.
 - No numbering, no bullets — only the JSON array of plain strings.`;
 
+export interface GeneratePromptsResult {
+  prompts: string[];
+  systemPrompt: string;
+  userMessage: string;
+}
+
 export async function generatePrompts(
   context: BrandContext,
   n: number,
@@ -27,7 +33,7 @@ export async function generatePrompts(
     model: ChatModel;
     tracking: ChatTrackingHeaders;
   },
-): Promise<string[]> {
+): Promise<GeneratePromptsResult> {
   const message = `Generate ${n} short user-style search queries for someone in this brand's category.
 
 Brand context:
@@ -59,6 +65,6 @@ Return JSON with exactly ${n} prompts.`;
   if (cleaned.length < n) {
     throw new Error(`[prompt-gen] requested ${n} prompts, model returned ${cleaned.length}`);
   }
-  return cleaned.slice(0, n);
+  return { prompts: cleaned.slice(0, n), systemPrompt: SYSTEM_PROMPT, userMessage: message };
 }
 

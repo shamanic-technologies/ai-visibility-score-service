@@ -541,6 +541,8 @@ describe("GET /orgs/visibility-score-runs/:id", () => {
         responseLengthWhenBrandNotFound: null,
         distinctCompetitorsCount: 0,
         visibilityScore: "0.8000",
+        promptGenSystemPrompt: "prompt-gen system prompt",
+        promptGenUserMessage: "prompt-gen user message with industry: saas",
         status: "completed" as const,
         error: null,
         startedAt: now,
@@ -564,7 +566,11 @@ describe("GET /orgs/visibility-score-runs/:id", () => {
       runIdFk: CHILD_ID,
       orgId: ORG_ID,
       promptIndex: 0,
-      promptText: "What is Acme?",
+      promptText: "best CRM for early stage startups",
+      judgeSystemPrompt: "You are a helpful assistant. Answer the user's question.",
+      judgeUserMessage: "best CRM for early stage startups",
+      extractorSystemPrompt: "extractor sys prompt",
+      extractorUserMessage: "Target brand:\n- name: Acme\n- domain: acme.com\n\nLLM response to analyze:\n\"\"\"\nAcme is a great company.\n\"\"\"",
       responseText: "Acme is a great company.",
       responseLengthChars: 24,
       brandFound: true,
@@ -622,6 +628,24 @@ describe("GET /orgs/visibility-score-runs/:id", () => {
     expect(res.body.by_provider[0].provider).toBe("google");
     expect(res.body.by_provider[0].model).toBe("pro");
     expect(res.body.by_provider[0].prompts).toHaveLength(1);
-    expect(res.body.by_provider[0].prompts[0].promptText).toBe("What is Acme?");
+    expect(res.body.by_provider[0].prompts[0].promptText).toBe("best CRM for early stage startups");
+
+    // Debug payload exposure: judge + extractor + prompt-gen prompts must be returned verbatim.
+    const promptRow = res.body.by_provider[0].prompts[0];
+    expect(promptRow.judgeSystemPrompt).toBe(
+      "You are a helpful assistant. Answer the user's question.",
+    );
+    expect(promptRow.judgeUserMessage).toBe("best CRM for early stage startups");
+    // The judge user message MUST equal the prompt text — server injects nothing.
+    expect(promptRow.judgeUserMessage).toBe(promptRow.promptText);
+    expect(promptRow.judgeUserMessage).not.toContain("Acme");
+    expect(promptRow.judgeUserMessage).not.toContain("acme.com");
+    expect(promptRow.extractorSystemPrompt).toBe("extractor sys prompt");
+    expect(promptRow.extractorUserMessage).toContain("Target brand:");
+    expect(promptRow.extractorUserMessage).toContain("name: Acme");
+    expect(promptRow.extractorUserMessage).toContain("domain: acme.com");
+
+    expect(res.body.run.promptGenSystemPrompt).toBe("prompt-gen system prompt");
+    expect(res.body.run.promptGenUserMessage).toContain("industry: saas");
   });
 });
