@@ -50,7 +50,7 @@ export const visibilityScoreRuns = pgTable(
     responseLengthWhenBrandFound: integer("response_length_when_brand_found"),
     responseLengthWhenBrandNotFound: integer("response_length_when_brand_not_found"),
     distinctCompetitorsCount: integer("distinct_competitors_count"),
-    visibilityScore: numeric("visibility_score", { precision: 5, scale: 2 }),
+    visibilityScore: numeric("visibility_score", { precision: 5, scale: 4 }),
 
     status: text("status").notNull().$type<"pending" | "running" | "completed" | "failed">(),
     error: text("error"),

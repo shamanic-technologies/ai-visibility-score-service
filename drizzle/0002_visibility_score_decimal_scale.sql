@@ -1,0 +1,1 @@
+ALTER TABLE "visibility_score_runs" ALTER COLUMN "visibility_score" SET DATA TYPE numeric(5, 4) USING (visibility_score / 100);

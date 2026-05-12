@@ -163,12 +163,24 @@ export const RunRowSchema = z
     extractionModel: z.string(),
     nPrompts: z.number(),
     weights: VisibilityWeightsSchema,
-    visibilityScore: z.string().nullable(),
-    brandMentionRate: z.string().nullable(),
-    shareOfVoice: z.string().nullable(),
-    netSentiment: z.string().nullable(),
-    citationRate: z.string().nullable(),
-    avgPosition: z.string().nullable(),
+    visibilityScore: z.string().nullable().openapi({
+      description: "Composite score, decimal 0–1 (clamped). Multiply by 100 for percentage display.",
+    }),
+    brandMentionRate: z.string().nullable().openapi({
+      description: "Fraction of prompts that mentioned the brand. Decimal 0–1.",
+    }),
+    shareOfVoice: z.string().nullable().openapi({
+      description: "Brand mentions / (brand + competitor mentions). Decimal 0–1.",
+    }),
+    netSentiment: z.string().nullable().openapi({
+      description: "(positive - negative) / brand_mention_count. Decimal in [-1, 1].",
+    }),
+    citationRate: z.string().nullable().openapi({
+      description: "Citations of the brand domain / N prompts. Decimal 0–1.",
+    }),
+    avgPosition: z.string().nullable().openapi({
+      description: "Mean rank of brand among mentions in responses (1 = first). Lower is better.",
+    }),
     status: z.string(),
     startedAt: z.string().nullable(),
     completedAt: z.string().nullable(),
