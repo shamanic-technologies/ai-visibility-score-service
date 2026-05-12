@@ -98,15 +98,17 @@ distinct_competitors_count   = #distinct competitor names across all responses
 top_competitors              = top 10 by mention count: { name, url, mention_count, avg_position,
                                                          share_of_voice, net_sentiment }
 
-visibility_score (0–100, clamped) =
-  100 * (
+visibility_score (0–1, clamped) =
     weights.brandMentionRate * brand_mention_rate +
     weights.citationRate     * citation_rate +
     weights.positionScore    * position_score +
     weights.shareOfVoice     * share_of_voice +
     weights.sentiment        * (net_sentiment + 1) / 2 +
     weights.brandAndUrlRate  * brand_and_url_rate
-  )
+
+# All rate metrics (visibility_score, brand_mention_rate, share_of_voice,
+# citation_rate, net_sentiment, position_score, etc.) are decimal in [0, 1].
+# Multiply by 100 for display as a percentage.
 ```
 
 Default weights: `0.25 / 0.15 / 0.20 / 0.20 / 0.15 / 0.05` (sums to 1.0).
