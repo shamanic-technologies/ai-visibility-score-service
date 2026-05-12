@@ -66,6 +66,26 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+// Flattens a Drizzle SQL/column tree into a string containing every column
+// name referenced. Avoids JSON.stringify, which chokes on Drizzle's circular
+// table↔column back-references.
+function serializeFilter(node: unknown, seen = new WeakSet<object>()): string {
+  if (node === null || node === undefined) return "";
+  if (typeof node !== "object") return String(node);
+  if (seen.has(node as object)) return "";
+  seen.add(node as object);
+  const obj = node as Record<string, unknown>;
+  const parts: string[] = [];
+  if (typeof obj.name === "string") parts.push(obj.name);
+  if (Array.isArray(obj.queryChunks)) {
+    for (const c of obj.queryChunks) parts.push(serializeFilter(c, seen));
+  }
+  for (const k of ["left", "right", "value", "table", "column"]) {
+    if (k in obj) parts.push(serializeFilter(obj[k], seen));
+  }
+  return parts.join(" ");
+}
+
 describe("GET /health", () => {
   it("returns 200 ok", async () => {
     const res = await request(createApp()).get("/health");
@@ -406,6 +426,51 @@ describe("GET /orgs/visibility-score-runs (list)", () => {
     expect(res.body.runs).toHaveLength(1);
     expect(res.body.runs[0].brandId).toBe(BRAND_ID_1);
     expect(res.body.runs[0].visibility_score_delta).toBe("0.05");
+  });
+
+  it("accepts campaignId filter and returns 200", async () => {
+    const CAMPAIGN_ID = "66666666-6666-4666-8666-666666666666";
+    const offset = vi.fn().mockResolvedValue([]);
+    const limitFn = vi.fn(() => ({ offset }));
+    const orderBy = vi.fn(() => ({ limit: limitFn }));
+    const where = vi.fn(() => ({ orderBy }));
+    const from = vi.fn(() => ({ where }));
+    vi.mocked(db.select).mockReturnValue({ from } as any);
+
+    const res = await request(createApp())
+      .get(`/orgs/visibility-score-runs?brandId=${BRAND_ID_1}&campaignId=${CAMPAIGN_ID}`)
+      .set(authHeaders({ "x-brand-id": BRAND_ID_1 }));
+
+    expect(res.status).toBe(200);
+    expect(where).toHaveBeenCalledTimes(1);
+    // and(...filters) is the single argument to where(); inspect its query chunks
+    // to confirm a campaign_id reference participated in the filter.
+    const whereArg = where.mock.calls[0][0];
+    expect(serializeFilter(whereArg)).toContain("campaign_id");
+  });
+
+  it("rejects invalid campaignId with 400", async () => {
+    const res = await request(createApp())
+      .get(`/orgs/visibility-score-runs?campaignId=not-a-uuid`)
+      .set(authHeaders({ "x-brand-id": BRAND_ID_1 }));
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("Invalid query");
+  });
+
+  it("omits campaign_id filter when query param absent", async () => {
+    const offset = vi.fn().mockResolvedValue([]);
+    const limitFn = vi.fn(() => ({ offset }));
+    const orderBy = vi.fn(() => ({ limit: limitFn }));
+    const where = vi.fn(() => ({ orderBy }));
+    const from = vi.fn(() => ({ where }));
+    vi.mocked(db.select).mockReturnValue({ from } as any);
+
+    const res = await request(createApp())
+      .get(`/orgs/visibility-score-runs?brandId=${BRAND_ID_1}`)
+      .set(authHeaders({ "x-brand-id": BRAND_ID_1 }));
+
+    expect(res.status).toBe(200);
+    expect(serializeFilter(where.mock.calls[0][0])).not.toContain("campaign_id");
   });
 });
 

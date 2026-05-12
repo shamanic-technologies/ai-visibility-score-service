@@ -16,7 +16,11 @@ export const visibilityScoreRuns = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     orgId: uuid("org_id").notNull(),
+    userId: uuid("user_id"),
     brandId: uuid("brand_id").notNull(),
+    campaignId: uuid("campaign_id"),
+    featureSlug: text("feature_slug"),
+    workflowSlug: text("workflow_slug"),
     parentRunId: uuid("parent_run_id"),
     runId: uuid("run_id"),
     aggregateRunId: uuid("aggregate_run_id").references((): AnyPgColumn => visibilityScoreRuns.id, { onDelete: "cascade" }),
@@ -70,6 +74,7 @@ export const visibilityScoreRuns = pgTable(
     index("vsr_org_brand_created_idx").on(t.orgId, t.brandId, t.createdAt),
     index("vsr_domain_idx").on(t.domain),
     index("vsr_aggregate_run_id_idx").on(t.aggregateRunId),
+    index("vsr_campaign_id_idx").on(t.campaignId),
   ],
 );
 

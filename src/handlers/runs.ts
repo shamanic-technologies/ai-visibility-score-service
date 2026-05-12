@@ -114,6 +114,7 @@ export async function listRuns(req: Request, res: Response): Promise<void> {
     isNull(visibilityScoreRuns.aggregateRunId),
   ];
   if (parsed.data.brandId) filters.push(eq(visibilityScoreRuns.brandId, parsed.data.brandId));
+  if (parsed.data.campaignId) filters.push(eq(visibilityScoreRuns.campaignId, parsed.data.campaignId));
   if (parsed.data.domain) filters.push(eq(visibilityScoreRuns.domain, parsed.data.domain));
   if (parsed.data.from) filters.push(gte(visibilityScoreRuns.createdAt, new Date(parsed.data.from)));
   if (parsed.data.to) filters.push(lte(visibilityScoreRuns.createdAt, new Date(parsed.data.to)));
@@ -241,6 +242,10 @@ export async function getRun(req: Request, res: Response): Promise<void> {
         .map((p) => ({
           promptIndex: p.promptIndex,
           promptText: p.promptText,
+          judgeSystemPrompt: p.judgeSystemPrompt ?? "",
+          judgeUserMessage: p.judgeUserMessage ?? "",
+          extractorSystemPrompt: p.extractorSystemPrompt ?? "",
+          extractorUserMessage: p.extractorUserMessage ?? "",
           responseText: p.responseText,
           responseLengthChars: p.responseLengthChars ?? p.responseText.length,
           brandFound: p.brandFound ?? false,
