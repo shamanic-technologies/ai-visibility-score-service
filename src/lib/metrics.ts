@@ -341,36 +341,30 @@ export function aggregate(
     .sort((a, b) => b.mention_count - a.mention_count)
     .slice(0, 10);
 
-  const sentimentNormalized = (net_sentiment + 1) / 2;
+  // Sentiment is undefined when the brand was never mentioned: net_sentiment falls back to 0
+  // via safeRate(0, 0), which would normalize to 0.5 and add a hardcoded floor to visibility_score.
+  // Treat it as null so its weight is redistributed, mirroring position_score handling.
+  const sentimentNormalized: number | null =
+    brand_mention_count === 0 ? null : (net_sentiment + 1) / 2;
 
-  // If position_score is null, redistribute its weight proportionally
-  const effectiveWeights = { ...weights };
-  if (position_score === null) {
-    const redistributed = weights.positionScore;
-    const remaining =
-      weights.brandMentionRate +
-      weights.citationRate +
-      weights.shareOfVoice +
-      weights.sentiment +
-      weights.brandAndUrlRate;
-    if (remaining > 0) {
-      const scale = (remaining + redistributed) / remaining;
-      effectiveWeights.brandMentionRate *= scale;
-      effectiveWeights.citationRate *= scale;
-      effectiveWeights.shareOfVoice *= scale;
-      effectiveWeights.sentiment *= scale;
-      effectiveWeights.brandAndUrlRate *= scale;
-    }
-    effectiveWeights.positionScore = 0;
-  }
-
-  const raw =
-    effectiveWeights.brandMentionRate * brand_mention_rate +
-    effectiveWeights.citationRate * citation_rate +
-    effectiveWeights.positionScore * (position_score ?? 0) +
-    effectiveWeights.shareOfVoice * share_of_voice +
-    effectiveWeights.sentiment * sentimentNormalized +
-    effectiveWeights.brandAndUrlRate * brand_and_url_rate;
+  // Each signal contributes weight * value. When a signal has no data (null), its weight is
+  // redistributed pro-rata to the remaining signals so the weighted sum stays on the same scale.
+  const signals: { weight: number; value: number | null }[] = [
+    { weight: weights.brandMentionRate, value: brand_mention_rate },
+    { weight: weights.citationRate, value: citation_rate },
+    { weight: weights.positionScore, value: position_score },
+    { weight: weights.shareOfVoice, value: share_of_voice },
+    { weight: weights.sentiment, value: sentimentNormalized },
+    { weight: weights.brandAndUrlRate, value: brand_and_url_rate },
+  ];
+  const definedWeightSum = signals
+    .filter((s) => s.value !== null)
+    .reduce((sum, s) => sum + s.weight, 0);
+  const totalWeightSum = signals.reduce((sum, s) => sum + s.weight, 0);
+  const scale = definedWeightSum === 0 ? 0 : totalWeightSum / definedWeightSum;
+  const raw = signals
+    .filter((s) => s.value !== null)
+    .reduce((sum, s) => sum + s.weight * scale * (s.value as number), 0);
   const visibility_score = Math.max(0, Math.min(1, raw));
 
   return {
