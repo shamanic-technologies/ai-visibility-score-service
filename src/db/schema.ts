@@ -55,6 +55,9 @@ export const visibilityScoreRuns = pgTable(
     distinctCompetitorsCount: integer("distinct_competitors_count"),
     visibilityScore: numeric("visibility_score", { precision: 5, scale: 4 }),
 
+    promptGenSystemPrompt: text("prompt_gen_system_prompt"),
+    promptGenUserMessage: text("prompt_gen_user_message"),
+
     status: text("status").notNull().$type<"pending" | "running" | "completed" | "failed">(),
     error: text("error"),
     startedAt: timestamp("started_at", { withTimezone: true }),
@@ -80,6 +83,10 @@ export const visibilityScorePrompts = pgTable(
     orgId: uuid("org_id").notNull(),
     promptIndex: integer("prompt_index").notNull(),
     promptText: text("prompt_text").notNull(),
+    judgeSystemPrompt: text("judge_system_prompt"),
+    judgeUserMessage: text("judge_user_message"),
+    extractorSystemPrompt: text("extractor_system_prompt"),
+    extractorUserMessage: text("extractor_user_message"),
     responseText: text("response_text").notNull(),
     responseLengthChars: integer("response_length_chars"),
     brandFound: boolean("brand_found"),
