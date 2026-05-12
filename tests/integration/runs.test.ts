@@ -154,7 +154,7 @@ describe("happy path POST /orgs/visibility-score-runs", () => {
         llmModel: "google/pro,anthropic/opus",
         promptGenModel: "flash",
         extractionProvider: "google",
-        extractionModel: "flash",
+        extractionModel: "pro",
         nPrompts: 25,
         weights: {
           brandMentionRate: 0.25,
@@ -251,7 +251,7 @@ describe("happy path POST /orgs/visibility-score-runs", () => {
     expect(callArg.promptGenProvider).toBe("google");
     expect(callArg.promptGenModel).toBe("flash");
     expect(callArg.extractionProvider).toBe("google");
-    expect(callArg.extractionModel).toBe("flash");
+    expect(callArg.extractionModel).toBe("pro");
     expect(callArg.nPrompts).toBe(25);
     expect(callArg.brandId).toBe(BRAND_ID_1);
   });
@@ -343,7 +343,7 @@ describe("GET /orgs/visibility-score-runs (list)", () => {
         llmModel: "google/pro,anthropic/opus",
         promptGenModel: "flash",
         extractionProvider: "google",
-        extractionModel: "flash",
+        extractionModel: "pro",
         nPrompts: 25,
         weights: {
           brandMentionRate: 0.25,
@@ -443,7 +443,7 @@ describe("GET /orgs/visibility-score-runs/:id", () => {
         llmModel: "google/pro,anthropic/opus",
         promptGenModel: "flash",
         extractionProvider: "google",
-        extractionModel: "flash",
+        extractionModel: "pro",
         nPrompts: 1,
         weights: {
           brandMentionRate: 0.25,
