@@ -64,6 +64,38 @@ describe("chatComplete", () => {
     });
   });
 
+  it("includes webSearch in the body when set true", async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ content: "x", tokensInput: 1, tokensOutput: 1, model: "m" }),
+    });
+
+    const { chatComplete } = await import("../../src/lib/chat-client.js");
+    await chatComplete(
+      { message: "m", systemPrompt: "", provider: "google", model: "flash", webSearch: true },
+      tracking,
+    );
+
+    const body = JSON.parse((fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body);
+    expect(body.webSearch).toBe(true);
+  });
+
+  it("omits webSearch from the body when not set (legacy callers unchanged)", async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ content: "x", tokensInput: 1, tokensOutput: 1, model: "m" }),
+    });
+
+    const { chatComplete } = await import("../../src/lib/chat-client.js");
+    await chatComplete(
+      { message: "m", systemPrompt: "", provider: "google", model: "flash" },
+      tracking,
+    );
+
+    const body = JSON.parse((fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body);
+    expect("webSearch" in body).toBe(false);
+  });
+
   it("throws on non-2xx response with status in error message", async () => {
     (fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: false,

@@ -9,6 +9,14 @@ export interface ChatCompleteParams {
   responseFormat?: "json";
   temperature?: number;
   maxTokens?: number;
+  /**
+   * Opt-in native web search. When true, chat-service attaches the provider's
+   * native web-search tool (Gemini → Google Search grounding; Anthropic →
+   * server-side web_search). Default (omitted) = no grounding, byte-identical
+   * to the legacy call. Only the visibility panel (judge) calls set this true —
+   * prompt-gen and extraction stay ungrounded.
+   */
+  webSearch?: boolean;
 }
 
 export interface ChatCompleteResult {
@@ -66,6 +74,7 @@ export async function chatComplete(
     ...(params.responseFormat && { responseFormat: params.responseFormat }),
     ...(params.temperature !== undefined && { temperature: params.temperature }),
     ...(params.maxTokens !== undefined && { maxTokens: params.maxTokens }),
+    ...(params.webSearch !== undefined && { webSearch: params.webSearch }),
   };
 
   const res = await fetch(`${baseUrl()}/complete`, {
