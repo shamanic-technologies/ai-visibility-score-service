@@ -276,3 +276,47 @@ describe("runVisibilityScore — prompt cache", () => {
     expect(cacheWrite).not.toHaveBeenCalled();
   });
 });
+
+describe("runVisibilityScore — judge grounding", () => {
+  it("calls every judge with webSearch:true (panel is web-grounded)", async () => {
+    mockBrandSuccess();
+    vi.mocked(cacheLookup).mockResolvedValue({
+      prompts: ["q1", "q2"],
+      systemPrompt: "sys-cached",
+      userMessage: "user-cached",
+    });
+    vi.mocked(chatComplete).mockResolvedValue({
+      content: "answer",
+      tokensInput: 1,
+      tokensOutput: 1,
+    });
+    vi.mocked(extractFromResponse).mockResolvedValue({
+      extraction: {
+        brandFound: true,
+        brandCount: 1,
+        brandPosition: 1,
+        urlFound: false,
+        urlCount: 0,
+        maxBrandsInResponse: 1,
+        sentiment: "positive",
+        sentimentScore: 0.5,
+        citationUrls: [],
+        competitors: [],
+      },
+      systemPrompt: "sys-ext",
+      userMessage: "user-ext",
+    });
+    vi.mocked(db.transaction).mockResolvedValue({
+      parentRow: { id: "x" },
+      judgeRuns: [],
+    } as any);
+
+    await runVisibilityScore(opts);
+
+    // 2 judges × 2 prompts = 4 judge calls — chatComplete in run.ts is judge-only.
+    expect(chatComplete).toHaveBeenCalledTimes(4);
+    for (const call of vi.mocked(chatComplete).mock.calls) {
+      expect(call[0].webSearch).toBe(true);
+    }
+  });
+});
