@@ -168,6 +168,11 @@ async function runJudge(
               systemPrompt: JUDGE_SYSTEM_PROMPT,
               provider: judge.provider,
               model: judge.model,
+              // Ground the measured panel: each provider answers via its native
+              // web search (Gemini Google Search grounding / Anthropic web_search),
+              // so the score reflects what a real user sees — not stale model memory.
+              // Prompt-gen and extraction deliberately stay ungrounded.
+              webSearch: true,
             },
             baseTracking,
           );
