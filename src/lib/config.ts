@@ -23,9 +23,9 @@ export const VISIBILITY_RUN_CONFIG: VisibilityRunConfig = {
     { provider: "anthropic", model: "sonnet" },
   ],
   promptGenProvider: "google",
-  promptGenModel: "pro",
+  promptGenModel: "flash",
   extractionProvider: "google",
-  extractionModel: "pro",
+  extractionModel: "flash",
   nPrompts: 25,
   weights: DEFAULT_WEIGHTS,
 };

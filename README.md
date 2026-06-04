@@ -157,11 +157,25 @@ Aggregation rules:
 - `top_competitors` and `citation_opportunities` are unioned across judges (by competitor
   name / domain) with mention counts summed.
 
-Failure semantics:
+Failure semantics (tolerate partial failure at both levels — never throw away already-spent grounding):
 
-- If a single judge fails, the audit still succeeds: the parent row is persisted with
-  the aggregate of the surviving judges and `error` records `"partial: <provider> failed: <msg>"`.
+- **Prompt level** — a judge runs its N prompts with `Promise.allSettled`. If some prompts fail
+  (transient chat-service 502s) the judge keeps its successful subset and computes metrics over it;
+  the child `error` records `"partial: <k>/<n> prompts failed"`. A judge fails as a whole only when
+  **every** prompt failed.
+- **Judge level** — if a single judge fails entirely (e.g. one provider is out of API credit), the
+  audit still succeeds from the surviving judges; the parent `error` records `"partial: <provider> failed: <msg>"`.
 - If ALL judges fail, the audit fails: HTTP 500 + a failed aggregate parent row.
+
+Run-level idempotence (24h cache):
+
+- Before any LLM work, `runVisibilityScore` looks up the most recent **completed** aggregate run
+  for `(orgId, brandId)` younger than `RUN_CACHE_TTL_HOURS` (24h). On a hit it rebuilds and returns
+  that bundle (`loadRunBundle`) — **zero** brand-resolve / prompt-gen / grounded judge calls.
+- A `failed` run never blocks a retry (only `completed` is cached). A partially-completed run still
+  counts as a hit — we prefer saving the spend over a marginally fresher imperfect run.
+- The cache key ignores `campaignId`: a second campaign auditing the same brand within 24h reuses the
+  audit (the returned run keeps its original `campaignId`).
 
 Adding a new judge (e.g. OpenAI) requires only appending to `VISIBILITY_RUN_CONFIG.judges`
 — no schema or API change.
