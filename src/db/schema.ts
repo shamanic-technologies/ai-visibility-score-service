@@ -169,6 +169,52 @@ export const visibilityScoreCompetitors = pgTable(
   ],
 );
 
+/**
+ * One row per visibility run, holding the raw Ahrefs Brand-Radar AI-visibility
+ * stats for the brand domain at run time. Supplementary to the LLM-measured
+ * score — a failed fetch is recorded (status="failed") and never blocks the run.
+ * Kept raw + flat for time-series: snapshots mean little alone, the deltas do.
+ */
+export const visibilityAhrefsSnapshots = pgTable(
+  "visibility_ahrefs_snapshots",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id").notNull(),
+    userId: uuid("user_id"),
+    brandId: uuid("brand_id").notNull(),
+    campaignId: uuid("campaign_id"),
+    featureSlug: text("feature_slug"),
+    workflowSlug: text("workflow_slug"),
+    runId: uuid("run_id"),
+    aggregateRunId: uuid("aggregate_run_id").references(() => visibilityScoreRuns.id, {
+      onDelete: "cascade",
+    }),
+    domain: text("domain").notNull(),
+    brandName: text("brand_name"),
+    status: text("status").notNull().$type<"completed" | "failed">(),
+    error: text("error"),
+    // Date the Ahrefs data reflects (upstream string, e.g. "2026-06-01"). Distinct from createdAt.
+    snapshotDate: text("snapshot_date"),
+    fetchedFromCache: boolean("fetched_from_cache"),
+    // Global brand mentions across all AI engines.
+    mentionsTotal: integer("mentions_total"),
+    // Per-AI-engine breakdown: [{ engine, mentions }].
+    mentionsByEngine: jsonb("mentions_by_engine").$type<AhrefEngineMention[]>(),
+    // Top competitor brands by citation count (global): [{ brand, domain, citations }].
+    topCompetitors: jsonb("top_competitors").$type<AhrefTopCompetitor[]>(),
+    // Full upstream payload (bronze) — preserve everything for future fields.
+    raw: jsonb("raw").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("vas_org_brand_created_idx").on(t.orgId, t.brandId, t.createdAt),
+    index("vas_brand_idx").on(t.brandId),
+    index("vas_domain_idx").on(t.domain),
+    index("vas_aggregate_run_id_idx").on(t.aggregateRunId),
+    index("vas_run_id_idx").on(t.runId),
+  ],
+);
+
 export interface VisibilityWeights {
   brandMentionRate: number;
   citationRate: number;
@@ -176,6 +222,19 @@ export interface VisibilityWeights {
   shareOfVoice: number;
   sentiment: number;
   brandAndUrlRate: number;
+}
+
+/** One AI search engine's brand-mention count from Ahrefs Brand-Radar. */
+export interface AhrefEngineMention {
+  engine: string;
+  mentions: number;
+}
+
+/** A competitor brand cited in Ahrefs Brand-Radar, by global citation count. */
+export interface AhrefTopCompetitor {
+  brand: string;
+  domain: string | null;
+  citations: number;
 }
 
 export type VisibilityScoreRun = typeof visibilityScoreRuns.$inferSelect;
@@ -186,3 +245,5 @@ export type VisibilityScoreCompetitor = typeof visibilityScoreCompetitors.$infer
 export type NewVisibilityScoreCompetitor = typeof visibilityScoreCompetitors.$inferInsert;
 export type VisibilityScorePromptCache = typeof visibilityScorePromptCache.$inferSelect;
 export type NewVisibilityScorePromptCache = typeof visibilityScorePromptCache.$inferInsert;
+export type VisibilityAhrefsSnapshot = typeof visibilityAhrefsSnapshots.$inferSelect;
+export type NewVisibilityAhrefsSnapshot = typeof visibilityAhrefsSnapshots.$inferInsert;

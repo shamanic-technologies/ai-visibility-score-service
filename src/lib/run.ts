@@ -5,10 +5,19 @@ import {
   visibilityScoreRuns,
   visibilityScorePrompts,
   visibilityScoreCompetitors,
+  visibilityAhrefsSnapshots,
   type VisibilityWeights,
 } from "../db/schema.js";
 import { extractBrandFields } from "./brand-client.js";
 import { chatComplete, type ChatModel, type ChatProvider, type ChatTrackingHeaders } from "./chat-client.js";
+import type { AhrefTrackingHeaders } from "./ahref-client.js";
+import {
+  fetchAhrefSnapshotSafe,
+  persistAhrefSnapshot,
+  serializeAhrefSnapshotRow,
+  type AhrefFetchOutcome,
+  type AhrefSnapshotResult,
+} from "./ahref-snapshot.js";
 import { generatePrompts, SYSTEM_PROMPT as PROMPT_GEN_SYSTEM_PROMPT, type BrandContext } from "./prompt-gen.js";
 import { cacheLookup, cacheWrite, computeSystemPromptHash } from "./prompt-cache.js";
 import { extractFromResponse } from "./extractor.js";
@@ -63,6 +72,12 @@ export interface RunResult {
   run: typeof visibilityScoreRuns.$inferSelect;
   metrics: AggregateMetrics;
   byProvider: JudgeRunResult[];
+  /**
+   * Raw Ahrefs Brand-Radar AI-visibility snapshot for the brand domain at run
+   * time. Supplementary to the LLM score; null if the snapshot could not be
+   * persisted. A failed Ahrefs fetch still yields a row with status="failed".
+   */
+  ahrefs: AhrefSnapshotResult | null;
 }
 
 function asString(v: unknown): string | undefined {
@@ -392,7 +407,26 @@ export async function loadRunBundle(
       ? aggregateAcrossProviders(childMetricsList)
       : ({} as AggregateMetrics);
 
-  return { run: parent, metrics, byProvider };
+  // Re-attach the Ahrefs snapshot persisted for this run (most recent for the
+  // aggregate), so cache-hit + GET-by-id responses echo the same `ahrefs` block
+  // a fresh run returns. Null when none was persisted. Same from/where shape as
+  // the queries above; latest picked in JS (one snapshot per run in practice).
+  const ahrefRows = await db
+    .select()
+    .from(visibilityAhrefsSnapshots)
+    .where(
+      and(
+        eq(visibilityAhrefsSnapshots.aggregateRunId, parent.id),
+        eq(visibilityAhrefsSnapshots.orgId, parent.orgId),
+      ),
+    );
+  const ahrefRow = ahrefRows
+    .slice()
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
+
+  const ahrefs = ahrefRow ? serializeAhrefSnapshotRow(ahrefRow) : null;
+
+  return { run: parent, metrics, byProvider, ahrefs };
 }
 
 async function runVisibilityScoreInner(
@@ -478,6 +512,24 @@ async function runVisibilityScoreInner(
   const brandName = asString(brand.name) ?? "(unknown brand)";
   const domain = brand.domain;
   onBrandResolved(domain, brandName);
+
+  // Kick off the Ahrefs Brand-Radar fetch in parallel with the judges so it
+  // adds no wall-clock latency beyond the slower of the two. Fail-soft: the
+  // outcome is captured (completed/failed) and persisted after the run is
+  // stored — it never blocks or fails the visibility score.
+  const ahrefTracking: AhrefTrackingHeaders = {
+    orgId: opts.orgId,
+    userId: opts.userId,
+    runId: opts.runId,
+    brandId: opts.brandId,
+    campaignId: opts.campaignId,
+    featureSlug: opts.featureSlug,
+    workflowSlug: opts.workflowSlug,
+  };
+  const ahrefOutcomePromise: Promise<AhrefFetchOutcome> = fetchAhrefSnapshotSafe(
+    domain,
+    ahrefTracking,
+  );
 
   const ctx: BrandContext = {
     category: asString(brandResp.fields["category"]?.value),
@@ -726,9 +778,29 @@ async function runVisibilityScoreInner(
     return { parentRow, judgeRuns };
   });
 
+  // Persist the Ahrefs snapshot linked to the aggregate run. Awaited (the fetch
+  // already ran in parallel with the judges) but never throws.
+  const ahrefOutcome = await ahrefOutcomePromise;
+  const ahrefs = await persistAhrefSnapshot(
+    {
+      orgId: opts.orgId,
+      userId: opts.userId,
+      brandId: opts.brandId,
+      campaignId: opts.campaignId,
+      featureSlug: opts.featureSlug,
+      workflowSlug: opts.workflowSlug,
+      runId: opts.runId,
+      aggregateRunId: persisted.parentRow.id,
+      domain,
+      brandName,
+    },
+    ahrefOutcome,
+  );
+
   return {
     run: persisted.parentRow,
     metrics: aggregateMetrics,
     byProvider: persisted.judgeRuns,
+    ahrefs,
   };
 }

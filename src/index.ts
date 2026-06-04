@@ -18,6 +18,8 @@ const REQUIRED_ENV = [
   "BRAND_SERVICE_API_KEY",
   "RUNS_SERVICE_URL",
   "RUNS_SERVICE_API_KEY",
+  "AHREF_SERVICE_URL",
+  "AHREF_SERVICE_API_KEY",
 ] as const;
 
 export function assertEnv(env: NodeJS.ProcessEnv = process.env): void {

@@ -88,6 +88,7 @@ export async function postRuns(req: Request, res: Response): Promise<void> {
         })),
         top_competitors: r.metrics.top_competitors,
         citation_opportunities: r.metrics.citation_opportunities,
+        ahrefs: r.ahrefs,
       },
     ],
   });

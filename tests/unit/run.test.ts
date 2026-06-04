@@ -31,6 +31,11 @@ vi.mock("../../src/lib/extractor.js", () => ({
   extractFromResponse: vi.fn(),
 }));
 
+vi.mock("../../src/lib/ahref-snapshot.js", () => ({
+  fetchAhrefSnapshotSafe: vi.fn(),
+  persistAhrefSnapshot: vi.fn(),
+}));
+
 import { runVisibilityScore } from "../../src/lib/run.js";
 import { db } from "../../src/db/index.js";
 import { extractBrandFields } from "../../src/lib/brand-client.js";
@@ -38,6 +43,30 @@ import { chatComplete } from "../../src/lib/chat-client.js";
 import { generatePrompts } from "../../src/lib/prompt-gen.js";
 import { cacheLookup, cacheWrite } from "../../src/lib/prompt-cache.js";
 import { extractFromResponse } from "../../src/lib/extractor.js";
+import { fetchAhrefSnapshotSafe, persistAhrefSnapshot } from "../../src/lib/ahref-snapshot.js";
+
+const AHREF_DATA = {
+  domain: "acme.com",
+  snapshotDate: "2026-06-01",
+  fetchedFromCache: true,
+  mentionsTotal: 1234,
+  mentionsByEngine: [{ engine: "chatgpt", mentions: 800 }],
+  topCompetitors: [{ brand: "Rival", domain: "rival.com", citations: 512 }],
+  raw: { foo: "bar" },
+};
+
+const AHREF_RESULT = {
+  id: "snap-1",
+  status: "completed" as const,
+  domain: "acme.com",
+  snapshotDate: "2026-06-01",
+  fetchedFromCache: true,
+  mentionsTotal: 1234,
+  mentionsByEngine: AHREF_DATA.mentionsByEngine,
+  topCompetitors: AHREF_DATA.topCompetitors,
+  error: null,
+  createdAt: "2026-06-04T00:00:00.000Z",
+};
 
 const ORG_ID = "11111111-1111-4111-8111-111111111111";
 const BRAND_ID = "22222222-2222-4222-8222-222222222222";
@@ -109,6 +138,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(cacheLookup).mockResolvedValue(null);
   vi.mocked(cacheWrite).mockResolvedValue(undefined);
+  vi.mocked(fetchAhrefSnapshotSafe).mockResolvedValue({ status: "completed", data: AHREF_DATA });
+  vi.mocked(persistAhrefSnapshot).mockResolvedValue(AHREF_RESULT);
   // Default: no recent completed run → 24h cache misses, full run proceeds.
   vi.mocked(db.select).mockReturnValue(selectChain([]));
 });
@@ -466,5 +497,81 @@ describe("runVisibilityScore — 24h run cache", () => {
 
     expect(extractBrandFields).toHaveBeenCalledTimes(1);
     expect(chatComplete).toHaveBeenCalled();
+  });
+});
+
+describe("runVisibilityScore — ahref snapshot", () => {
+  function mockSuccessPath() {
+    mockBrandSuccess();
+    vi.mocked(cacheLookup).mockResolvedValue({
+      prompts: ["q1", "q2"],
+      systemPrompt: "sys-cached",
+      userMessage: "user-cached",
+    });
+    vi.mocked(chatComplete).mockResolvedValue({
+      content: "answer",
+      tokensInput: 1,
+      tokensOutput: 1,
+    });
+    vi.mocked(extractFromResponse).mockResolvedValue({
+      extraction: {
+        brandFound: true,
+        brandCount: 1,
+        brandPosition: 1,
+        urlFound: false,
+        urlCount: 0,
+        maxBrandsInResponse: 1,
+        sentiment: "positive",
+        sentimentScore: 0.5,
+        citationUrls: [],
+        competitors: [],
+      },
+      systemPrompt: "sys-ext",
+      userMessage: "user-ext",
+    });
+    vi.mocked(db.transaction).mockResolvedValue({
+      parentRow: { id: "x" },
+      judgeRuns: [],
+    } as any);
+  }
+
+  it("fetches Ahrefs for the brand domain and persists the snapshot linked to the aggregate run", async () => {
+    mockSuccessPath();
+
+    const result = await runVisibilityScore(opts);
+
+    expect(fetchAhrefSnapshotSafe).toHaveBeenCalledTimes(1);
+    expect(fetchAhrefSnapshotSafe).toHaveBeenCalledWith(
+      "acme.com",
+      expect.objectContaining({ orgId: ORG_ID, runId: RUN_ID, brandId: BRAND_ID }),
+    );
+
+    expect(persistAhrefSnapshot).toHaveBeenCalledTimes(1);
+    const persistArgs = vi.mocked(persistAhrefSnapshot).mock.calls[0];
+    expect(persistArgs[0]).toMatchObject({
+      domain: "acme.com",
+      brandName: "Acme",
+      aggregateRunId: "x",
+      orgId: ORG_ID,
+      runId: RUN_ID,
+    });
+    expect(persistArgs[1]).toEqual({ status: "completed", data: AHREF_DATA });
+
+    expect(result.ahrefs).toEqual(AHREF_RESULT);
+  });
+
+  it("run succeeds (no throw) and returns a failed snapshot when the Ahrefs fetch fails", async () => {
+    mockSuccessPath();
+    vi.mocked(fetchAhrefSnapshotSafe).mockResolvedValue({ status: "failed", error: "ahref down" });
+    const failedSnapshot = { ...AHREF_RESULT, status: "failed" as const, error: "ahref down" };
+    vi.mocked(persistAhrefSnapshot).mockResolvedValue(failedSnapshot);
+
+    const result = await runVisibilityScore(opts);
+
+    expect(persistAhrefSnapshot).toHaveBeenCalledWith(expect.anything(), {
+      status: "failed",
+      error: "ahref down",
+    });
+    expect(result.ahrefs?.status).toBe("failed");
   });
 });
