@@ -3,6 +3,7 @@ import {
   visibilityAhrefsSnapshots,
   type AhrefEngineMention,
   type AhrefTopCompetitor,
+  type VisibilityAhrefsSnapshot,
 } from "../db/schema.js";
 import {
   fetchAhrefAiVisibility,
@@ -42,6 +43,22 @@ export interface AhrefSnapshotResult {
   topCompetitors: AhrefTopCompetitor[] | null;
   error: string | null;
   createdAt: string;
+}
+
+/** Serialize a persisted snapshot row to the API-facing result (omits raw payload). */
+export function serializeAhrefSnapshotRow(row: VisibilityAhrefsSnapshot): AhrefSnapshotResult {
+  return {
+    id: row.id,
+    status: row.status,
+    domain: row.domain,
+    snapshotDate: row.snapshotDate,
+    fetchedFromCache: row.fetchedFromCache,
+    mentionsTotal: row.mentionsTotal,
+    mentionsByEngine: row.mentionsByEngine,
+    topCompetitors: row.topCompetitors,
+    error: row.error,
+    createdAt: row.createdAt.toISOString(),
+  };
 }
 
 /**
@@ -99,18 +116,7 @@ export async function persistAhrefSnapshot(
       })
       .returning();
 
-    return {
-      id: row.id,
-      status: row.status,
-      domain: row.domain,
-      snapshotDate: row.snapshotDate,
-      fetchedFromCache: row.fetchedFromCache,
-      mentionsTotal: row.mentionsTotal,
-      mentionsByEngine: row.mentionsByEngine,
-      topCompetitors: row.topCompetitors,
-      error: row.error,
-      createdAt: row.createdAt.toISOString(),
-    };
+    return serializeAhrefSnapshotRow(row);
   } catch (err) {
     console.error(
       `[ai-visibility-score-service] failed to persist Ahrefs snapshot for run ${params.runId}:`,

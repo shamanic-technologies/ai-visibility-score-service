@@ -12,7 +12,10 @@ vi.mock("../../src/db/index.js", () => ({
 }));
 
 // Mock the orchestrator so we don't actually call external services
-vi.mock("../../src/lib/run.js", () => ({
+// Stub only runVisibilityScore (the LLM-driven path); keep loadRunBundle real so the
+// GET-by-id handler still rebuilds bundles from the mocked db.select rows.
+vi.mock("../../src/lib/run.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/lib/run.js")>()),
   runVisibilityScore: vi.fn(),
 }));
 
@@ -269,9 +272,9 @@ describe("happy path POST /orgs/visibility-score-runs", () => {
       { provider: "anthropic", model: "sonnet" },
     ]);
     expect(callArg.promptGenProvider).toBe("google");
-    expect(callArg.promptGenModel).toBe("pro");
+    expect(callArg.promptGenModel).toBe("flash");
     expect(callArg.extractionProvider).toBe("google");
-    expect(callArg.extractionModel).toBe("pro");
+    expect(callArg.extractionModel).toBe("flash");
     expect(callArg.nPrompts).toBe(25);
     expect(callArg.brandId).toBe(BRAND_ID_1);
   });

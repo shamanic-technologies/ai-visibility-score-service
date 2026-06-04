@@ -1,9 +1,11 @@
 import pLimit from "p-limit";
+import { eq, and, gte, isNull, desc } from "drizzle-orm";
 import { db } from "../db/index.js";
 import {
   visibilityScoreRuns,
   visibilityScorePrompts,
   visibilityScoreCompetitors,
+  visibilityAhrefsSnapshots,
   type VisibilityWeights,
 } from "../db/schema.js";
 import { extractBrandFields } from "./brand-client.js";
@@ -12,6 +14,7 @@ import type { AhrefTrackingHeaders } from "./ahref-client.js";
 import {
   fetchAhrefSnapshotSafe,
   persistAhrefSnapshot,
+  serializeAhrefSnapshotRow,
   type AhrefFetchOutcome,
   type AhrefSnapshotResult,
 } from "./ahref-snapshot.js";
@@ -27,6 +30,12 @@ import {
 import type { JudgeConfig } from "./config.js";
 
 const PROMPT_CONCURRENCY = 5;
+
+// Run-level idempotence: re-running the same brand's visibility audit within this
+// window serves the most recent COMPLETED run instead of spending LLM tokens again.
+// A `failed` run never blocks a retry; a partially-completed run still counts as a
+// hit (we prefer saving the spend over a marginally fresher imperfect run).
+const RUN_CACHE_TTL_HOURS = 24;
 
 export const JUDGE_SYSTEM_PROMPT = "";
 
@@ -146,6 +155,8 @@ interface JudgeExecutionSuccess {
   judge: JudgeConfig;
   extracted: ExtractedPrompt[];
   metrics: AggregateMetrics;
+  /** Number of prompts that failed but were tolerated (judge kept its successful subset). */
+  partialFailures: number;
   startedAt: Date;
   completedAt: Date;
 }
@@ -171,7 +182,10 @@ async function runJudge(
   const startedAt = new Date();
   try {
     const limit = pLimit(PROMPT_CONCURRENCY);
-    const extracted: ExtractedPrompt[] = await Promise.all(
+    // Tolerate partial prompt failures: one prompt's 502 (transient LLM error) must NOT
+    // discard the other prompts' already-spent grounded answers. Keep every fulfilled
+    // prompt; the judge only fails as a whole when EVERY prompt failed.
+    const settled = await Promise.allSettled(
       prompts.map((promptText, idx) =>
         limit(async () => {
           const t0 = Date.now();
@@ -229,8 +243,36 @@ async function runJudge(
       ),
     );
 
+    const extracted: ExtractedPrompt[] = [];
+    const failures: string[] = [];
+    for (const result of settled) {
+      if (result.status === "fulfilled") {
+        extracted.push(result.value);
+      } else {
+        failures.push(result.reason instanceof Error ? result.reason.message : String(result.reason));
+      }
+    }
+
+    // Every prompt failed → the judge as a whole failed (propagates to the err branch).
+    if (extracted.length === 0) {
+      throw new Error(`all ${prompts.length} prompts failed — ${failures[0] ?? "unknown error"}`);
+    }
+    if (failures.length > 0) {
+      console.warn(
+        `[ai-visibility-score-service] judge ${judge.provider}/${judge.model}: ${failures.length}/${prompts.length} prompts failed, kept ${extracted.length} (first error: ${failures[0]})`,
+      );
+    }
+
     const metrics = aggregate(extracted, domain, opts.weights);
-    return { kind: "ok", judge, extracted, metrics, startedAt, completedAt: new Date() };
+    return {
+      kind: "ok",
+      judge,
+      extracted,
+      metrics,
+      partialFailures: failures.length,
+      startedAt,
+      completedAt: new Date(),
+    };
   } catch (err) {
     return {
       kind: "err",
@@ -242,11 +284,166 @@ async function runJudge(
   }
 }
 
+/**
+ * Most recent COMPLETED aggregate run for (orgId, brandId) within the cache window,
+ * or null. `failed` runs are ignored so a prior failure never blocks a fresh retry.
+ */
+async function findRecentCompletedRun(
+  orgId: string,
+  brandId: string,
+): Promise<typeof visibilityScoreRuns.$inferSelect | null> {
+  const cutoff = new Date(Date.now() - RUN_CACHE_TTL_HOURS * 60 * 60 * 1000);
+  const [row] = await db
+    .select()
+    .from(visibilityScoreRuns)
+    .where(
+      and(
+        eq(visibilityScoreRuns.orgId, orgId),
+        eq(visibilityScoreRuns.brandId, brandId),
+        isNull(visibilityScoreRuns.aggregateRunId),
+        eq(visibilityScoreRuns.status, "completed"),
+        gte(visibilityScoreRuns.createdAt, cutoff),
+      ),
+    )
+    .orderBy(desc(visibilityScoreRuns.createdAt))
+    .limit(1);
+  return row ?? null;
+}
+
+/**
+ * Rebuild the full RunResult bundle (parent + merged metrics + per-provider children)
+ * from already-persisted rows. Shared by the 24h cache-hit path and the GET-by-id handler
+ * so both reconstruct identical shapes.
+ */
+export async function loadRunBundle(
+  parent: typeof visibilityScoreRuns.$inferSelect,
+): Promise<RunResult> {
+  const children = await db
+    .select()
+    .from(visibilityScoreRuns)
+    .where(
+      and(
+        eq(visibilityScoreRuns.aggregateRunId, parent.id),
+        eq(visibilityScoreRuns.orgId, parent.orgId),
+      ),
+    );
+
+  const byProvider: JudgeRunResult[] = [];
+  const childMetricsList: AggregateMetrics[] = [];
+
+  for (const child of children) {
+    const promptRows = await db
+      .select()
+      .from(visibilityScorePrompts)
+      .where(
+        and(
+          eq(visibilityScorePrompts.runIdFk, child.id),
+          eq(visibilityScorePrompts.orgId, parent.orgId),
+        ),
+      );
+
+    const competitorRows = await db
+      .select()
+      .from(visibilityScoreCompetitors)
+      .where(
+        and(
+          eq(visibilityScoreCompetitors.runIdFk, child.id),
+          eq(visibilityScoreCompetitors.orgId, parent.orgId),
+        ),
+      );
+
+    const extracted: ExtractedPrompt[] = promptRows
+      .slice()
+      .sort((a, b) => a.promptIndex - b.promptIndex)
+      .map((p) => ({
+        promptIndex: p.promptIndex,
+        promptText: p.promptText,
+        judgeSystemPrompt: p.judgeSystemPrompt ?? "",
+        judgeUserMessage: p.judgeUserMessage ?? "",
+        extractorSystemPrompt: p.extractorSystemPrompt ?? "",
+        extractorUserMessage: p.extractorUserMessage ?? "",
+        responseText: p.responseText,
+        responseLengthChars: p.responseLengthChars ?? p.responseText.length,
+        brandFound: p.brandFound ?? false,
+        brandCount: p.brandCount ?? 0,
+        brandPosition: p.brandPosition,
+        urlFound: p.urlFound ?? false,
+        urlCount: p.urlCount ?? 0,
+        brandAndUrlCoOccurrence: p.brandAndUrlCoOccurrence ?? false,
+        maxBrandsInResponse: p.maxBrandsInResponse ?? 0,
+        sentiment: (p.sentiment ?? "neutral") as "positive" | "neutral" | "negative",
+        sentimentScore: p.sentimentScore ? Number(p.sentimentScore) : 0,
+        citationUrls: p.citationUrls ?? [],
+        competitors: competitorRows
+          .filter((c) => c.promptIdFk === p.id)
+          .map((c) => ({
+            name: c.competitorName,
+            url: c.competitorUrl,
+            position: c.position ?? 0,
+            sentiment: (c.sentiment ?? "neutral") as "positive" | "neutral" | "negative",
+            sentimentScore: c.sentimentScore ? Number(c.sentimentScore) : 0,
+            citationUrl: c.citationUrl,
+          })),
+        latencyMs: p.latencyMs ?? 0,
+        tokensInput: p.tokensInput ?? 0,
+        tokensOutput: p.tokensOutput ?? 0,
+      }));
+
+    const childMetrics =
+      promptRows.length === 0 ? null : aggregate(extracted, parent.domain ?? "", parent.weights);
+    if (childMetrics) childMetricsList.push(childMetrics);
+
+    byProvider.push({
+      judge: { provider: child.llmProvider as ChatProvider, model: child.llmModel as ChatModel },
+      run: child,
+      prompts: promptRows,
+      competitors: competitorRows,
+      metrics: childMetrics ?? ({} as AggregateMetrics),
+    });
+  }
+
+  const metrics =
+    childMetricsList.length > 0
+      ? aggregateAcrossProviders(childMetricsList)
+      : ({} as AggregateMetrics);
+
+  // Re-attach the Ahrefs snapshot persisted for this run (most recent for the
+  // aggregate), so cache-hit + GET-by-id responses echo the same `ahrefs` block
+  // a fresh run returns. Null when none was persisted. Same from/where shape as
+  // the queries above; latest picked in JS (one snapshot per run in practice).
+  const ahrefRows = await db
+    .select()
+    .from(visibilityAhrefsSnapshots)
+    .where(
+      and(
+        eq(visibilityAhrefsSnapshots.aggregateRunId, parent.id),
+        eq(visibilityAhrefsSnapshots.orgId, parent.orgId),
+      ),
+    );
+  const ahrefRow = ahrefRows
+    .slice()
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
+
+  const ahrefs = ahrefRow ? serializeAhrefSnapshotRow(ahrefRow) : null;
+
+  return { run: parent, metrics, byProvider, ahrefs };
+}
+
 async function runVisibilityScoreInner(
   opts: RunOptions,
   startedAt: Date,
   onBrandResolved: (domain: string, brandName: string) => void,
 ): Promise<RunResult> {
+  // Run-level 24h idempotence — serve the latest completed audit for this brand and
+  // skip brand-resolve + prompt-gen + all grounded judge calls (zero LLM spend).
+  const cachedRun = await findRecentCompletedRun(opts.orgId, opts.brandId);
+  if (cachedRun) {
+    console.log(
+      `[ai-visibility-score-service] 24h cache hit for brand ${opts.brandId} (run ${cachedRun.id}, created ${cachedRun.createdAt.toISOString()}) — skipping LLM work`,
+    );
+    return loadRunBundle(cachedRun);
+  }
+
   const baseTracking: ChatTrackingHeaders = {
     orgId: opts.orgId,
     userId: opts.userId,
@@ -504,7 +701,11 @@ async function runVisibilityScoreInner(
           promptGenSystemPrompt: promptGen.systemPrompt,
           promptGenUserMessage: promptGen.userMessage,
           status: isOk ? "completed" : "failed",
-          error: isOk ? null : exec.error.message,
+          error: isOk
+            ? exec.partialFailures > 0
+              ? `partial: ${exec.partialFailures}/${opts.nPrompts} prompts failed`
+              : null
+            : exec.error.message,
           startedAt: exec.startedAt,
           completedAt: exec.completedAt,
         })

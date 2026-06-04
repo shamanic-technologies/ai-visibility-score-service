@@ -4,6 +4,7 @@ vi.mock("../../src/db/index.js", () => ({
   db: {
     insert: vi.fn(),
     transaction: vi.fn(),
+    select: vi.fn(),
   },
 }));
 
@@ -119,12 +120,28 @@ function captureInsertedRow() {
   return valuesSpy;
 }
 
+// Chainable + thenable stand-in for a drizzle select builder. Resolves to `result`
+// whether the caller ends the chain with `.limit()` or just awaits after `.where()`.
+function selectChain(result: unknown[]) {
+  const chain: any = {
+    from: () => chain,
+    where: () => chain,
+    orderBy: () => chain,
+    limit: () => Promise.resolve(result),
+    then: (onF: (v: unknown[]) => unknown, onR?: (e: unknown) => unknown) =>
+      Promise.resolve(result).then(onF, onR),
+  };
+  return chain;
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(cacheLookup).mockResolvedValue(null);
   vi.mocked(cacheWrite).mockResolvedValue(undefined);
   vi.mocked(fetchAhrefSnapshotSafe).mockResolvedValue({ status: "completed", data: AHREF_DATA });
   vi.mocked(persistAhrefSnapshot).mockResolvedValue(AHREF_RESULT);
+  // Default: no recent completed run → 24h cache misses, full run proceeds.
+  vi.mocked(db.select).mockReturnValue(selectChain([]));
 });
 
 afterEach(() => {
@@ -349,6 +366,137 @@ describe("runVisibilityScore — judge grounding", () => {
     for (const call of vi.mocked(chatComplete).mock.calls) {
       expect(call[0].webSearch).toBe(true);
     }
+  });
+});
+
+describe("runVisibilityScore — partial-failure tolerance", () => {
+  const okExtraction = {
+    extraction: {
+      brandFound: true,
+      brandCount: 1,
+      brandPosition: 1,
+      urlFound: false,
+      urlCount: 0,
+      maxBrandsInResponse: 1,
+      sentiment: "positive" as const,
+      sentimentScore: 0.5,
+      citationUrls: [],
+      competitors: [],
+    },
+    systemPrompt: "sys-ext",
+    userMessage: "user-ext",
+  };
+
+  function mockPromptsCached() {
+    vi.mocked(cacheLookup).mockResolvedValue({
+      prompts: ["q1", "q2"],
+      systemPrompt: "sys-cached",
+      userMessage: "user-cached",
+    });
+  }
+
+  it("A — one failing prompt does NOT fail the whole judge; run still completes", async () => {
+    mockBrandSuccess();
+    mockPromptsCached();
+    vi.mocked(chatComplete).mockResolvedValue({ content: "answer", tokensInput: 1, tokensOutput: 1 });
+    // 1 of the 4 (2 judges × 2 prompts) extractions fails; the rest succeed.
+    vi.mocked(extractFromResponse)
+      .mockRejectedValueOnce(new Error("chat-service 502"))
+      .mockResolvedValue(okExtraction);
+    vi.mocked(db.transaction).mockResolvedValue({ parentRow: { id: "x" }, judgeRuns: [] } as any);
+
+    await runVisibilityScore(opts);
+
+    // Reached the persistence transaction = the run completed (no failure-row insert).
+    expect(db.transaction).toHaveBeenCalledTimes(1);
+    expect(db.insert).not.toHaveBeenCalled();
+  });
+
+  it("B — one provider fully down (all its prompts fail) → run still completes from the other", async () => {
+    mockBrandSuccess();
+    mockPromptsCached();
+    // Anthropic is out of credit: every anthropic judge call throws. Google succeeds.
+    vi.mocked(chatComplete).mockImplementation(async (params: any) => {
+      if (params.provider === "anthropic") throw new Error("LLM call failed");
+      return { content: "answer", tokensInput: 1, tokensOutput: 1 } as any;
+    });
+    vi.mocked(extractFromResponse).mockResolvedValue(okExtraction);
+    vi.mocked(db.transaction).mockResolvedValue({ parentRow: { id: "x" }, judgeRuns: [] } as any);
+
+    await runVisibilityScore(opts);
+
+    expect(db.transaction).toHaveBeenCalledTimes(1);
+    expect(db.insert).not.toHaveBeenCalled();
+  });
+
+  it("throws (failed run) only when EVERY provider is down", async () => {
+    mockBrandSuccess();
+    mockPromptsCached();
+    vi.mocked(chatComplete).mockRejectedValue(new Error("LLM call failed"));
+    vi.mocked(extractFromResponse).mockResolvedValue(okExtraction);
+    const valuesSpy = captureInsertedRow();
+
+    await expect(runVisibilityScore(opts)).rejects.toThrow(/all judges failed/);
+    expect(valuesSpy.mock.calls[0][0].status).toBe("failed");
+  });
+});
+
+describe("runVisibilityScore — 24h run cache", () => {
+  const cachedParent = {
+    id: "cached-run-id",
+    orgId: ORG_ID,
+    brandId: BRAND_ID,
+    domain: "acme.com",
+    weights: opts.weights,
+    status: "completed" as const,
+    createdAt: new Date("2026-06-04T00:00:00.000Z"),
+  };
+
+  it("serves the cached completed run and spends ZERO LLM tokens", async () => {
+    vi.mocked(db.select)
+      .mockReturnValueOnce(selectChain([cachedParent])) // findRecentCompletedRun → hit
+      .mockReturnValueOnce(selectChain([])); // loadRunBundle children → none
+
+    const result = await runVisibilityScore(opts);
+
+    expect(result.run.id).toBe("cached-run-id");
+    expect(extractBrandFields).not.toHaveBeenCalled();
+    expect(generatePrompts).not.toHaveBeenCalled();
+    expect(chatComplete).not.toHaveBeenCalled();
+    expect(db.transaction).not.toHaveBeenCalled();
+  });
+
+  it("runs fresh on cache miss (no recent completed run)", async () => {
+    // default db.select → [] (miss)
+    mockBrandSuccess();
+    vi.mocked(cacheLookup).mockResolvedValue({
+      prompts: ["q1", "q2"],
+      systemPrompt: "sys-cached",
+      userMessage: "user-cached",
+    });
+    vi.mocked(chatComplete).mockResolvedValue({ content: "answer", tokensInput: 1, tokensOutput: 1 });
+    vi.mocked(extractFromResponse).mockResolvedValue({
+      extraction: {
+        brandFound: true,
+        brandCount: 1,
+        brandPosition: 1,
+        urlFound: false,
+        urlCount: 0,
+        maxBrandsInResponse: 1,
+        sentiment: "positive",
+        sentimentScore: 0.5,
+        citationUrls: [],
+        competitors: [],
+      },
+      systemPrompt: "sys-ext",
+      userMessage: "user-ext",
+    });
+    vi.mocked(db.transaction).mockResolvedValue({ parentRow: { id: "x" }, judgeRuns: [] } as any);
+
+    await runVisibilityScore(opts);
+
+    expect(extractBrandFields).toHaveBeenCalledTimes(1);
+    expect(chatComplete).toHaveBeenCalled();
   });
 });
 
