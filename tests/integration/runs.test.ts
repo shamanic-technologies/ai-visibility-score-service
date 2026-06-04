@@ -269,7 +269,7 @@ describe("happy path POST /orgs/visibility-score-runs", () => {
     const callArg = vi.mocked(runVisibilityScore).mock.calls[0][0];
     expect(callArg.judges).toEqual([
       { provider: "google", model: "flash" },
-      { provider: "anthropic", model: "sonnet" },
+      { provider: "anthropic", model: "haiku" },
     ]);
     expect(callArg.promptGenProvider).toBe("google");
     expect(callArg.promptGenModel).toBe("flash");
