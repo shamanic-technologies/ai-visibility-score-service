@@ -8,6 +8,7 @@ import { db } from "./db/index.js";
 import { apiKeyAuth, requireOrgId } from "./middleware/auth.js";
 import { withRunTracking } from "./middleware/run-tracking.js";
 import { postRuns, listRuns, getRun } from "./handlers/runs.js";
+import { startStuckRunReaper } from "./lib/reaper.js";
 
 const REQUIRED_ENV = [
   "AI_VISIBILITY_SCORE_SERVICE_DATABASE_URL",
@@ -93,6 +94,10 @@ if (process.env.NODE_ENV !== "test") {
       const app = createApp();
       app.listen(PORT, "::", () => {
         console.log(`[ai-visibility-score-service] listening on port ${PORT}`);
+        // Backstop for runs killed mid-flight (redeploy/crash) — flips stuck `running`
+        // rows to `failed`. Started AFTER listen() so it never delays the port bind.
+        startStuckRunReaper();
+        console.log("[ai-visibility-score-service] stuck-run reaper started");
       });
     })
     .catch((err) => {

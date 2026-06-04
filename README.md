@@ -131,22 +131,25 @@ brandId
   prompt-gen → chat-service POST /complete (google/flash, JSON)  → N user-style queries
         │   (prompts are generated ONCE and shared across every judge)
         ▼
+  INSERT visibility_score_runs        (1 aggregate parent, status='running', aggregate_run_id=NULL)
+        │   ↳ written BEFORE any judge runs — an in-flight run is visible immediately,
+        │     never an invisible money-burning black hole
+        ▼
   for each judge in config.judges (parallel):
     for each query (concurrency 5):
       chat-service POST /complete (judge.provider/judge.model)   → response, tokens, latency
       chat-service POST /complete (google/pro, JSON)             → structured extraction
     metrics.ts :: aggregate(prompts, domain, weights)            → per-judge AggregateMetrics
+    TX (per judge, committed the moment it finishes):
+      INSERT visibility_score_runs      (1 per-provider child row, aggregate_run_id=parent.id)
+      INSERT visibility_score_prompts   (N rows tied to the child run)
+      INSERT visibility_score_competitors (M rows tied to the child run + prompt)
         │
         ▼
   metrics.ts :: aggregateAcrossProviders(perJudge[])             → aggregate AggregateMetrics
         │
         ▼
-  TX:
-    INSERT visibility_score_runs        (1 aggregate parent row, aggregate_run_id=NULL)
-    for each judge:
-      INSERT visibility_score_runs      (1 per-provider child row, aggregate_run_id=parent.id)
-      INSERT visibility_score_prompts   (N rows tied to the child run)
-      INSERT visibility_score_competitors (M rows tied to the child run + prompt)
+  UPDATE visibility_score_runs        (flip parent → 'completed' with merged metrics)
         │
         ▼
   return { run (parent), by_provider[], top_competitors, citation_opportunities }
@@ -169,7 +172,19 @@ Failure semantics (tolerate partial failure at both levels — never throw away 
   **every** prompt failed.
 - **Judge level** — if a single judge fails entirely (e.g. one provider is out of API credit), the
   audit still succeeds from the surviving judges; the parent `error` records `"partial: <provider> failed: <msg>"`.
-- If ALL judges fail, the audit fails: HTTP 500 + a failed aggregate parent row.
+- If ALL judges fail, the audit fails: HTTP 500 and the parent row is flipped to `status='failed'`.
+
+Incremental persistence + stuck-run reaper (a run never burns money into the void):
+
+- The aggregate parent is inserted as `status='running'` **before** brand-resolve / prompt-gen /
+  judges, then `loadRunBundle`-shaped children are committed **per judge, the moment each finishes**
+  (independent transaction), and the parent is flipped to its terminal state at the end. So a run
+  killed mid-flight (redeploy, crash, proxy timeout) keeps every already-spent judge result instead
+  of losing the whole run — persistence is incremental, not write-at-end.
+- A run left stuck in `running` (process killed before the terminal flip) is the backstop case: the
+  **reaper** (`src/lib/reaper.ts`, started after `app.listen()`, ticks every 5 min) flips any
+  `running` row older than 30 min to `failed`, so the dashboard never shows a phantom in-flight run.
+- The failed-flip itself is best-effort + logged loud; the reaper is the guarantee.
 
 Run-level idempotence (24h cache):
 

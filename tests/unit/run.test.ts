@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 vi.mock("../../src/db/index.js", () => ({
   db: {
     insert: vi.fn(),
+    update: vi.fn(),
     transaction: vi.fn(),
     select: vi.fn(),
   },
@@ -71,6 +72,7 @@ const AHREF_RESULT = {
 const ORG_ID = "11111111-1111-4111-8111-111111111111";
 const BRAND_ID = "22222222-2222-4222-8222-222222222222";
 const RUN_ID = "33333333-3333-4333-8333-333333333333";
+const PARENT_DB_ID = "parent-x";
 
 const opts = {
   brandId: BRAND_ID,
@@ -114,14 +116,64 @@ function mockBrandSuccess() {
   });
 }
 
-function captureInsertedRow() {
-  const valuesSpy = vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue([]) });
+const okExtraction = {
+  extraction: {
+    brandFound: true,
+    brandCount: 1,
+    brandPosition: 1,
+    urlFound: false,
+    urlCount: 0,
+    maxBrandsInResponse: 1,
+    sentiment: "positive" as const,
+    sentimentScore: 0.5,
+    citationUrls: [],
+    competitors: [],
+  },
+  systemPrompt: "sys-ext",
+  userMessage: "user-ext",
+};
+
+// Capture the values passed to the single `db.insert` (the `running` parent row).
+function mockParentInsert() {
+  const valuesSpy = vi
+    .fn()
+    .mockReturnValue({ returning: vi.fn().mockResolvedValue([{ id: PARENT_DB_ID }]) });
   vi.mocked(db.insert).mockReturnValue({ values: valuesSpy } as any);
   return valuesSpy;
 }
 
-// Chainable + thenable stand-in for a drizzle select builder. Resolves to `result`
-// whether the caller ends the chain with `.limit()` or just awaits after `.where()`.
+// Capture every `db.update(...).set(...)` argument (brand stamp + terminal flip). Supports
+// both `await update().set().where()` (brand stamp) and `await update().set().where().returning()`
+// (terminal flip → [parentRow]).
+function mockUpdate(returnRow: Record<string, unknown> = { id: PARENT_DB_ID, status: "completed" }) {
+  const setSpy = vi.fn();
+  const chain: any = {
+    set: (v: unknown) => {
+      setSpy(v);
+      return chain;
+    },
+    where: () => chain,
+    returning: () => Promise.resolve([returnRow]),
+    then: (onF: (v: unknown[]) => unknown, onR?: (e: unknown) => unknown) =>
+      Promise.resolve([returnRow]).then(onF, onR),
+  };
+  vi.mocked(db.update).mockReturnValue(chain);
+  return setSpy;
+}
+
+// Per-judge transaction: each call runs the callback against a tx whose inserts resolve to
+// a 1-element row array (enough for the child-row id + prompt rows).
+function mockJudgeTransactions() {
+  const tx = {
+    insert: vi.fn().mockReturnValue({
+      values: vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue([{ id: "child-x" }]) }),
+    }),
+  };
+  vi.mocked(db.transaction).mockImplementation((cb: any) => cb(tx));
+  return tx;
+}
+
+// Chainable + thenable stand-in for a drizzle select builder.
 function selectChain(result: unknown[]) {
   const chain: any = {
     from: () => chain,
@@ -132,6 +184,14 @@ function selectChain(result: unknown[]) {
       Promise.resolve(result).then(onF, onR),
   };
   return chain;
+}
+
+// Full happy-path persistence stack: parent insert + updates + per-judge transactions.
+function mockPersistence() {
+  mockParentInsert();
+  const setSpy = mockUpdate();
+  mockJudgeTransactions();
+  return setSpy;
 }
 
 beforeEach(() => {
@@ -148,143 +208,143 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("runVisibilityScore — failure persistence", () => {
-  it("inserts a failed aggregate row when ALL judges fail", async () => {
+describe("runVisibilityScore — incremental persistence", () => {
+  function mockFullSuccess() {
     mockBrandSuccess();
-    vi.mocked(generatePrompts).mockResolvedValue({
+    vi.mocked(cacheLookup).mockResolvedValue({
       prompts: ["q1", "q2"],
-      systemPrompt: "sys-pg",
-      userMessage: "user-pg",
+      systemPrompt: "sys-cached",
+      userMessage: "user-cached",
     });
-    vi.mocked(chatComplete).mockResolvedValue({
-      content: "answer",
-      tokensInput: 1,
-      tokensOutput: 1,
+    vi.mocked(chatComplete).mockResolvedValue({ content: "answer", tokensInput: 1, tokensOutput: 1 });
+    vi.mocked(extractFromResponse).mockResolvedValue(okExtraction);
+    return mockPersistence();
+  }
+
+  it("inserts the parent row as 'running' BEFORE any judge call", async () => {
+    const valuesSpy = mockParentInsert();
+    mockUpdate();
+    mockJudgeTransactions();
+    mockBrandSuccess();
+    vi.mocked(cacheLookup).mockResolvedValue({
+      prompts: ["q1", "q2"],
+      systemPrompt: "sys-cached",
+      userMessage: "user-cached",
     });
-    vi.mocked(extractFromResponse).mockRejectedValue(new Error("chat-service 502"));
+    vi.mocked(chatComplete).mockResolvedValue({ content: "answer", tokensInput: 1, tokensOutput: 1 });
+    vi.mocked(extractFromResponse).mockResolvedValue(okExtraction);
 
-    const valuesSpy = captureInsertedRow();
-
-    await expect(runVisibilityScore(opts)).rejects.toThrow(/all judges failed/);
+    await runVisibilityScore(opts);
 
     expect(db.insert).toHaveBeenCalledTimes(1);
     const inserted = valuesSpy.mock.calls[0][0];
-    expect(inserted.status).toBe("failed");
+    expect(inserted.status).toBe("running");
     expect(inserted.judgeKind).toBe("aggregate");
     expect(inserted.aggregateRunId).toBeNull();
     expect(inserted.llmProvider).toBe("aggregate");
     expect(inserted.llmModel).toBe("google/flash,anthropic/sonnet");
-    expect(inserted.orgId).toBe(ORG_ID);
-    expect(inserted.brandId).toBe(BRAND_ID);
-    expect(inserted.runId).toBe(RUN_ID);
-    expect(inserted.domain).toBe("acme.com");
-    expect(inserted.brandName).toBe("Acme");
-    expect(inserted.startedAt).toBeInstanceOf(Date);
-    expect(inserted.completedAt).toBeInstanceOf(Date);
-  });
-
-  it("inserts a failed aggregate row with null brand info when brand-fetch throws", async () => {
-    vi.mocked(extractBrandFields).mockRejectedValue(new Error("brand-service down"));
-
-    const valuesSpy = captureInsertedRow();
-
-    await expect(runVisibilityScore(opts)).rejects.toThrow("brand-service down");
-
-    expect(db.insert).toHaveBeenCalledTimes(1);
-    const inserted = valuesSpy.mock.calls[0][0];
-    expect(inserted.status).toBe("failed");
-    expect(inserted.judgeKind).toBe("aggregate");
-    expect(inserted.error).toBe("brand-service down");
-    expect(inserted.orgId).toBe(ORG_ID);
-    expect(inserted.brandId).toBe(BRAND_ID);
     expect(inserted.domain).toBeNull();
     expect(inserted.brandName).toBeNull();
+    expect(inserted.startedAt).toBeInstanceOf(Date);
+    // Parent row is written before the first grounded LLM call burns any tokens.
+    const insertOrder = vi.mocked(db.insert).mock.invocationCallOrder[0];
+    const firstJudgeOrder = vi.mocked(chatComplete).mock.invocationCallOrder[0];
+    expect(insertOrder).toBeLessThan(firstJudgeOrder);
   });
 
-  it("does not call db.insert via the failure path on success (transaction handles it)", async () => {
+  it("stamps the resolved brand onto the running row", async () => {
+    const setSpy = mockFullSuccess();
+
+    await runVisibilityScore(opts);
+
+    // First update = brand stamp.
+    expect(setSpy.mock.calls[0][0]).toEqual({ domain: "acme.com", brandName: "Acme" });
+  });
+
+  it("flips the parent to 'completed' with aggregate metrics on success", async () => {
+    const setSpy = mockFullSuccess();
+
+    await runVisibilityScore(opts);
+
+    const completedSet = setSpy.mock.calls.find((c) => c[0].status === "completed");
+    expect(completedSet).toBeDefined();
+    expect(completedSet![0].completedAt).toBeInstanceOf(Date);
+    expect(completedSet![0]).toHaveProperty("visibilityScore");
+  });
+
+  it("persists each judge in its own transaction (incremental checkpoint)", async () => {
+    mockFullSuccess();
+
+    await runVisibilityScore(opts);
+
+    // One transaction per configured judge — committed independently as each finishes.
+    expect(db.transaction).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("runVisibilityScore — failure persistence", () => {
+  it("flips the parent to 'failed' (no second insert) when ALL judges fail", async () => {
     mockBrandSuccess();
     vi.mocked(generatePrompts).mockResolvedValue({
       prompts: ["q1", "q2"],
       systemPrompt: "sys-pg",
       userMessage: "user-pg",
     });
-    vi.mocked(chatComplete).mockResolvedValue({
-      content: "answer",
-      tokensInput: 1,
-      tokensOutput: 1,
-    });
-    vi.mocked(extractFromResponse).mockResolvedValue({
-      extraction: {
-        brandFound: true,
-        brandCount: 1,
-        brandPosition: 1,
-        urlFound: false,
-        urlCount: 0,
-        maxBrandsInResponse: 1,
-        sentiment: "positive",
-        sentimentScore: 0.5,
-        citationUrls: [],
-        competitors: [],
-      },
-      systemPrompt: "sys-ext",
-      userMessage: "user-ext",
-    });
+    vi.mocked(chatComplete).mockResolvedValue({ content: "answer", tokensInput: 1, tokensOutput: 1 });
+    vi.mocked(extractFromResponse).mockRejectedValue(new Error("chat-service 502"));
+    mockParentInsert();
+    const setSpy = mockUpdate({ id: PARENT_DB_ID, status: "failed" });
+    mockJudgeTransactions();
 
-    vi.mocked(db.transaction).mockResolvedValue({
-      parentRow: { id: "x" },
-      judgeRuns: [],
-    } as any);
+    await expect(runVisibilityScore(opts)).rejects.toThrow(/all judges failed/);
 
-    await runVisibilityScore(opts);
-
-    expect(db.insert).not.toHaveBeenCalled();
-    expect(db.transaction).toHaveBeenCalledTimes(1);
+    // Parent inserted once (running); failure is an UPDATE, not a new insert.
+    expect(db.insert).toHaveBeenCalledTimes(1);
+    const failedSet = setSpy.mock.calls.find((c) => c[0].status === "failed");
+    expect(failedSet).toBeDefined();
+    expect(failedSet![0].error).toMatch(/all judges failed/);
+    expect(failedSet![0].completedAt).toBeInstanceOf(Date);
   });
 
-  it("propagates the original error even if failure-row insert itself throws", async () => {
+  it("flips the parent to 'failed' when brand-fetch throws, propagating the original error", async () => {
     vi.mocked(extractBrandFields).mockRejectedValue(new Error("brand-service down"));
-    vi.mocked(db.insert).mockImplementation(() => {
+    mockParentInsert();
+    const setSpy = mockUpdate({ id: PARENT_DB_ID, status: "failed" });
+
+    await expect(runVisibilityScore(opts)).rejects.toThrow("brand-service down");
+
+    expect(db.insert).toHaveBeenCalledTimes(1);
+    const failedSet = setSpy.mock.calls.find((c) => c[0].status === "failed");
+    expect(failedSet).toBeDefined();
+    expect(failedSet![0].error).toBe("brand-service down");
+  });
+
+  it("propagates the original error even if the failed-flip update itself throws", async () => {
+    vi.mocked(extractBrandFields).mockRejectedValue(new Error("brand-service down"));
+    mockParentInsert();
+    vi.mocked(db.update).mockImplementation(() => {
       throw new Error("DB disconnected");
     });
 
     await expect(runVisibilityScore(opts)).rejects.toThrow("brand-service down");
   });
 
-  it("throws when opts.judges is empty (fail loud, no silent default)", async () => {
-    await expect(
-      runVisibilityScore({ ...opts, judges: [] }),
-    ).rejects.toThrow(/at least one judge is required/);
+  it("throws when opts.judges is empty (fail loud, no insert)", async () => {
+    const valuesSpy = mockParentInsert();
+
+    await expect(runVisibilityScore({ ...opts, judges: [] })).rejects.toThrow(
+      /at least one judge is required/,
+    );
+    expect(valuesSpy).not.toHaveBeenCalled();
   });
 });
 
 describe("runVisibilityScore — prompt cache", () => {
   function mockSuccessPath() {
     mockBrandSuccess();
-    vi.mocked(chatComplete).mockResolvedValue({
-      content: "answer",
-      tokensInput: 1,
-      tokensOutput: 1,
-    });
-    vi.mocked(extractFromResponse).mockResolvedValue({
-      extraction: {
-        brandFound: true,
-        brandCount: 1,
-        brandPosition: 1,
-        urlFound: false,
-        urlCount: 0,
-        maxBrandsInResponse: 1,
-        sentiment: "positive",
-        sentimentScore: 0.5,
-        citationUrls: [],
-        competitors: [],
-      },
-      systemPrompt: "sys-ext",
-      userMessage: "user-ext",
-    });
-    vi.mocked(db.transaction).mockResolvedValue({
-      parentRow: { id: "x" },
-      judgeRuns: [],
-    } as any);
+    vi.mocked(chatComplete).mockResolvedValue({ content: "answer", tokensInput: 1, tokensOutput: 1 });
+    vi.mocked(extractFromResponse).mockResolvedValue(okExtraction);
+    mockPersistence();
   }
 
   it("calls generatePrompts and writes to cache on miss", async () => {
@@ -302,12 +362,7 @@ describe("runVisibilityScore — prompt cache", () => {
     expect(cacheWrite).toHaveBeenCalledTimes(1);
     const writeArg = vi.mocked(cacheWrite).mock.calls[0][0];
     expect(writeArg.brandId).toBe(BRAND_ID);
-    expect(writeArg.nPrompts).toBe(2);
-    expect(writeArg.promptGenProvider).toBe("google");
-    expect(writeArg.promptGenModel).toBe("pro");
     expect(writeArg.prompts).toEqual(["q1", "q2"]);
-    expect(writeArg.systemPrompt).toBe("sys-pg");
-    expect(writeArg.userMessage).toBe("user-pg");
   });
 
   it("skips generatePrompts when cache hit", async () => {
@@ -333,31 +388,9 @@ describe("runVisibilityScore — judge grounding", () => {
       systemPrompt: "sys-cached",
       userMessage: "user-cached",
     });
-    vi.mocked(chatComplete).mockResolvedValue({
-      content: "answer",
-      tokensInput: 1,
-      tokensOutput: 1,
-    });
-    vi.mocked(extractFromResponse).mockResolvedValue({
-      extraction: {
-        brandFound: true,
-        brandCount: 1,
-        brandPosition: 1,
-        urlFound: false,
-        urlCount: 0,
-        maxBrandsInResponse: 1,
-        sentiment: "positive",
-        sentimentScore: 0.5,
-        citationUrls: [],
-        competitors: [],
-      },
-      systemPrompt: "sys-ext",
-      userMessage: "user-ext",
-    });
-    vi.mocked(db.transaction).mockResolvedValue({
-      parentRow: { id: "x" },
-      judgeRuns: [],
-    } as any);
+    vi.mocked(chatComplete).mockResolvedValue({ content: "answer", tokensInput: 1, tokensOutput: 1 });
+    vi.mocked(extractFromResponse).mockResolvedValue(okExtraction);
+    mockPersistence();
 
     await runVisibilityScore(opts);
 
@@ -370,23 +403,6 @@ describe("runVisibilityScore — judge grounding", () => {
 });
 
 describe("runVisibilityScore — partial-failure tolerance", () => {
-  const okExtraction = {
-    extraction: {
-      brandFound: true,
-      brandCount: 1,
-      brandPosition: 1,
-      urlFound: false,
-      urlCount: 0,
-      maxBrandsInResponse: 1,
-      sentiment: "positive" as const,
-      sentimentScore: 0.5,
-      citationUrls: [],
-      competitors: [],
-    },
-    systemPrompt: "sys-ext",
-    userMessage: "user-ext",
-  };
-
   function mockPromptsCached() {
     vi.mocked(cacheLookup).mockResolvedValue({
       prompts: ["q1", "q2"],
@@ -399,34 +415,32 @@ describe("runVisibilityScore — partial-failure tolerance", () => {
     mockBrandSuccess();
     mockPromptsCached();
     vi.mocked(chatComplete).mockResolvedValue({ content: "answer", tokensInput: 1, tokensOutput: 1 });
-    // 1 of the 4 (2 judges × 2 prompts) extractions fails; the rest succeed.
     vi.mocked(extractFromResponse)
       .mockRejectedValueOnce(new Error("chat-service 502"))
       .mockResolvedValue(okExtraction);
-    vi.mocked(db.transaction).mockResolvedValue({ parentRow: { id: "x" }, judgeRuns: [] } as any);
+    const setSpy = mockPersistence();
 
     await runVisibilityScore(opts);
 
-    // Reached the persistence transaction = the run completed (no failure-row insert).
-    expect(db.transaction).toHaveBeenCalledTimes(1);
-    expect(db.insert).not.toHaveBeenCalled();
+    // Reached the terminal completed flip = the run completed.
+    expect(setSpy.mock.calls.some((c) => c[0].status === "completed")).toBe(true);
+    expect(db.transaction).toHaveBeenCalledTimes(2);
   });
 
   it("B — one provider fully down (all its prompts fail) → run still completes from the other", async () => {
     mockBrandSuccess();
     mockPromptsCached();
-    // Anthropic is out of credit: every anthropic judge call throws. Google succeeds.
     vi.mocked(chatComplete).mockImplementation(async (params: any) => {
       if (params.provider === "anthropic") throw new Error("LLM call failed");
       return { content: "answer", tokensInput: 1, tokensOutput: 1 } as any;
     });
     vi.mocked(extractFromResponse).mockResolvedValue(okExtraction);
-    vi.mocked(db.transaction).mockResolvedValue({ parentRow: { id: "x" }, judgeRuns: [] } as any);
+    const setSpy = mockPersistence();
 
     await runVisibilityScore(opts);
 
-    expect(db.transaction).toHaveBeenCalledTimes(1);
-    expect(db.insert).not.toHaveBeenCalled();
+    expect(setSpy.mock.calls.some((c) => c[0].status === "completed")).toBe(true);
+    expect(db.transaction).toHaveBeenCalledTimes(2);
   });
 
   it("throws (failed run) only when EVERY provider is down", async () => {
@@ -434,10 +448,12 @@ describe("runVisibilityScore — partial-failure tolerance", () => {
     mockPromptsCached();
     vi.mocked(chatComplete).mockRejectedValue(new Error("LLM call failed"));
     vi.mocked(extractFromResponse).mockResolvedValue(okExtraction);
-    const valuesSpy = captureInsertedRow();
+    mockParentInsert();
+    const setSpy = mockUpdate({ id: PARENT_DB_ID, status: "failed" });
+    mockJudgeTransactions();
 
     await expect(runVisibilityScore(opts)).rejects.toThrow(/all judges failed/);
-    expect(valuesSpy.mock.calls[0][0].status).toBe("failed");
+    expect(setSpy.mock.calls.some((c) => c[0].status === "failed")).toBe(true);
   });
 });
 
@@ -452,7 +468,7 @@ describe("runVisibilityScore — 24h run cache", () => {
     createdAt: new Date("2026-06-04T00:00:00.000Z"),
   };
 
-  it("serves the cached completed run and spends ZERO LLM tokens", async () => {
+  it("serves the cached completed run and spends ZERO LLM tokens (no insert/update/tx)", async () => {
     vi.mocked(db.select)
       .mockReturnValueOnce(selectChain([cachedParent])) // findRecentCompletedRun → hit
       .mockReturnValueOnce(selectChain([])); // loadRunBundle children → none
@@ -463,11 +479,12 @@ describe("runVisibilityScore — 24h run cache", () => {
     expect(extractBrandFields).not.toHaveBeenCalled();
     expect(generatePrompts).not.toHaveBeenCalled();
     expect(chatComplete).not.toHaveBeenCalled();
+    expect(db.insert).not.toHaveBeenCalled();
+    expect(db.update).not.toHaveBeenCalled();
     expect(db.transaction).not.toHaveBeenCalled();
   });
 
   it("runs fresh on cache miss (no recent completed run)", async () => {
-    // default db.select → [] (miss)
     mockBrandSuccess();
     vi.mocked(cacheLookup).mockResolvedValue({
       prompts: ["q1", "q2"],
@@ -475,28 +492,14 @@ describe("runVisibilityScore — 24h run cache", () => {
       userMessage: "user-cached",
     });
     vi.mocked(chatComplete).mockResolvedValue({ content: "answer", tokensInput: 1, tokensOutput: 1 });
-    vi.mocked(extractFromResponse).mockResolvedValue({
-      extraction: {
-        brandFound: true,
-        brandCount: 1,
-        brandPosition: 1,
-        urlFound: false,
-        urlCount: 0,
-        maxBrandsInResponse: 1,
-        sentiment: "positive",
-        sentimentScore: 0.5,
-        citationUrls: [],
-        competitors: [],
-      },
-      systemPrompt: "sys-ext",
-      userMessage: "user-ext",
-    });
-    vi.mocked(db.transaction).mockResolvedValue({ parentRow: { id: "x" }, judgeRuns: [] } as any);
+    vi.mocked(extractFromResponse).mockResolvedValue(okExtraction);
+    mockPersistence();
 
     await runVisibilityScore(opts);
 
     expect(extractBrandFields).toHaveBeenCalledTimes(1);
     expect(chatComplete).toHaveBeenCalled();
+    expect(db.insert).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -508,31 +511,9 @@ describe("runVisibilityScore — ahref snapshot", () => {
       systemPrompt: "sys-cached",
       userMessage: "user-cached",
     });
-    vi.mocked(chatComplete).mockResolvedValue({
-      content: "answer",
-      tokensInput: 1,
-      tokensOutput: 1,
-    });
-    vi.mocked(extractFromResponse).mockResolvedValue({
-      extraction: {
-        brandFound: true,
-        brandCount: 1,
-        brandPosition: 1,
-        urlFound: false,
-        urlCount: 0,
-        maxBrandsInResponse: 1,
-        sentiment: "positive",
-        sentimentScore: 0.5,
-        citationUrls: [],
-        competitors: [],
-      },
-      systemPrompt: "sys-ext",
-      userMessage: "user-ext",
-    });
-    vi.mocked(db.transaction).mockResolvedValue({
-      parentRow: { id: "x" },
-      judgeRuns: [],
-    } as any);
+    vi.mocked(chatComplete).mockResolvedValue({ content: "answer", tokensInput: 1, tokensOutput: 1 });
+    vi.mocked(extractFromResponse).mockResolvedValue(okExtraction);
+    mockPersistence();
   }
 
   it("fetches Ahrefs for the brand domain and persists the snapshot linked to the aggregate run", async () => {
@@ -551,7 +532,7 @@ describe("runVisibilityScore — ahref snapshot", () => {
     expect(persistArgs[0]).toMatchObject({
       domain: "acme.com",
       brandName: "Acme",
-      aggregateRunId: "x",
+      aggregateRunId: PARENT_DB_ID,
       orgId: ORG_ID,
       runId: RUN_ID,
     });

@@ -94,30 +94,41 @@ export async function runVisibilityScore(opts: RunOptions): Promise<RunResult> {
     throw new Error("[ai-visibility-score-service] at least one judge is required in config.judges");
   }
 
-  const startedAt = new Date();
-  let domain: string | null = null;
-  let brandName: string | null = null;
+  // Run-level 24h idempotence — serve the latest completed audit for this brand and
+  // skip brand-resolve + prompt-gen + all grounded judge calls (zero LLM spend).
+  // Checked BEFORE inserting a row so a cache hit never creates a duplicate run.
+  const cachedRun = await findRecentCompletedRun(opts.orgId, opts.brandId);
+  if (cachedRun) {
+    console.log(
+      `[ai-visibility-score-service] 24h cache hit for brand ${opts.brandId} (run ${cachedRun.id}, created ${cachedRun.createdAt.toISOString()}) — skipping LLM work`,
+    );
+    return loadRunBundle(cachedRun);
+  }
 
+  const startedAt = new Date();
+  // Persist the aggregate parent as `running` BEFORE any expensive work. This is the
+  // checkpoint that makes a run visible the moment it starts: a campaign is never an
+  // invisible money-burning black hole, and a crash / redeploy / timeout mid-run leaves
+  // a row the reaper can flip to `failed` instead of vanishing. Children + metrics are
+  // filled in incrementally (per judge) and the row is flipped to its terminal state at
+  // the end.
+  const parent = await insertRunningParent(opts, startedAt);
   try {
-    return await runVisibilityScoreInner(opts, startedAt, (d, n) => {
-      domain = d;
-      brandName = n;
-    });
+    return await runVisibilityScoreInner(opts, parent, startedAt);
   } catch (err) {
-    await persistFailedAggregateRun(opts, startedAt, domain, brandName, err);
+    await flipRunFailed(parent.id, err);
     throw err;
   }
 }
 
-async function persistFailedAggregateRun(
+/** Insert the aggregate parent row in `running` state, before brand-resolve / judges. */
+async function insertRunningParent(
   opts: RunOptions,
   startedAt: Date,
-  domain: string | null,
-  brandName: string | null,
-  err: unknown,
-): Promise<void> {
-  try {
-    await db.insert(visibilityScoreRuns).values({
+): Promise<typeof visibilityScoreRuns.$inferSelect> {
+  const [row] = await db
+    .insert(visibilityScoreRuns)
+    .values({
       orgId: opts.orgId,
       userId: opts.userId ?? null,
       brandId: opts.brandId,
@@ -128,8 +139,8 @@ async function persistFailedAggregateRun(
       runId: opts.runId,
       aggregateRunId: null,
       judgeKind: "aggregate",
-      domain,
-      brandName,
+      domain: null,
+      brandName: null,
       llmProvider: "aggregate",
       llmModel: opts.judges.map((j) => `${j.provider}/${j.model}`).join(","),
       promptGenModel: opts.promptGenModel,
@@ -137,14 +148,29 @@ async function persistFailedAggregateRun(
       extractionModel: opts.extractionModel,
       nPrompts: opts.nPrompts,
       weights: opts.weights,
-      status: "failed",
-      error: err instanceof Error ? err.message : String(err),
+      status: "running",
       startedAt,
-      completedAt: new Date(),
-    });
+    })
+    .returning();
+  return row;
+}
+
+/**
+ * Flip the aggregate parent to `failed`. Best-effort: a failed flip is logged loud and
+ * the stuck-run reaper is the backstop — but it must NOT mask the original run error,
+ * which the caller rethrows. No new failure row is inserted; the parent already exists
+ * from insertRunningParent.
+ */
+async function flipRunFailed(parentId: string, err: unknown): Promise<void> {
+  const message = err instanceof Error ? err.message : String(err);
+  try {
+    await db
+      .update(visibilityScoreRuns)
+      .set({ status: "failed", error: message, completedAt: new Date() })
+      .where(eq(visibilityScoreRuns.id, parentId));
   } catch (dbErr) {
     console.error(
-      `[ai-visibility-score-service] failed to persist failure row for run ${opts.runId}:`,
+      `[ai-visibility-score-service] failed to flip run ${parentId} to 'failed' (reaper will backstop):`,
       dbErr,
     );
   }
@@ -431,19 +457,9 @@ export async function loadRunBundle(
 
 async function runVisibilityScoreInner(
   opts: RunOptions,
+  parent: typeof visibilityScoreRuns.$inferSelect,
   startedAt: Date,
-  onBrandResolved: (domain: string, brandName: string) => void,
 ): Promise<RunResult> {
-  // Run-level 24h idempotence — serve the latest completed audit for this brand and
-  // skip brand-resolve + prompt-gen + all grounded judge calls (zero LLM spend).
-  const cachedRun = await findRecentCompletedRun(opts.orgId, opts.brandId);
-  if (cachedRun) {
-    console.log(
-      `[ai-visibility-score-service] 24h cache hit for brand ${opts.brandId} (run ${cachedRun.id}, created ${cachedRun.createdAt.toISOString()}) — skipping LLM work`,
-    );
-    return loadRunBundle(cachedRun);
-  }
-
   const baseTracking: ChatTrackingHeaders = {
     orgId: opts.orgId,
     userId: opts.userId,
@@ -511,7 +527,12 @@ async function runVisibilityScoreInner(
   }
   const brandName = asString(brand.name) ?? "(unknown brand)";
   const domain = brand.domain;
-  onBrandResolved(domain, brandName);
+  // Stamp the resolved brand onto the running row so an in-flight (or later-failed) run
+  // shows which brand it is instead of a null.
+  await db
+    .update(visibilityScoreRuns)
+    .set({ domain, brandName })
+    .where(eq(visibilityScoreRuns.id, parent.id));
 
   // Kick off the Ahrefs Brand-Radar fetch in parallel with the judges so it
   // adds no wall-clock latency beyond the slower of the two. Fail-soft: the
@@ -572,210 +593,50 @@ async function runVisibilityScoreInner(
   }
   const prompts = promptGen.prompts;
 
-  // Run all judges in parallel.
-  const judgeExecutions = await Promise.all(
-    opts.judges.map((judge) => runJudge(judge, opts, prompts, brandName, domain, baseTracking)),
+  // Run all judges in parallel; each judge persists its OWN child run + prompts +
+  // competitors the moment it finishes (independent transaction). This is the
+  // incremental checkpoint: a judge that completed survives even if the process dies
+  // before the others finish, so already-spent grounded answers are never lost.
+  const judgeResults = await Promise.all(
+    opts.judges.map(async (judge) => {
+      const exec = await runJudge(judge, opts, prompts, brandName, domain, baseTracking);
+      const persisted = await persistJudgeRun(exec, opts, parent.id, domain, brandName, promptGen);
+      return { exec, persisted };
+    }),
   );
 
-  const successes = judgeExecutions.filter((e): e is JudgeExecutionSuccess => e.kind === "ok");
-  const failures = judgeExecutions.filter((e): e is JudgeExecutionFailure => e.kind === "err");
+  const successes = judgeResults
+    .map((r) => r.exec)
+    .filter((e): e is JudgeExecutionSuccess => e.kind === "ok");
+  const failures = judgeResults
+    .map((r) => r.exec)
+    .filter((e): e is JudgeExecutionFailure => e.kind === "err");
 
   if (successes.length === 0) {
-    const messages = failures.map((f) => `${f.judge.provider}/${f.judge.model}: ${f.error.message}`).join("; ");
+    const messages = failures
+      .map((f) => `${f.judge.provider}/${f.judge.model}: ${f.error.message}`)
+      .join("; ");
+    // Children already persisted as `failed`; the outer catch flips the parent to failed.
     throw new Error(`[ai-visibility-score-service] all judges failed — ${messages}`);
   }
 
   const aggregateMetrics = aggregateAcrossProviders(successes.map((s) => s.metrics));
   const completedAt = new Date();
 
-  const aggregateError = failures.length === 0
-    ? null
-    : `partial: ${failures.map((f) => `${f.judge.provider}/${f.judge.model}: ${f.error.message}`).join("; ")}`;
+  const aggregateError =
+    failures.length === 0
+      ? null
+      : `partial: ${failures.map((f) => `${f.judge.provider}/${f.judge.model}: ${f.error.message}`).join("; ")}`;
 
-  const persisted = await db.transaction(async (tx) => {
-    // 1. Insert aggregate parent row first to get its id.
-    const [parentRow] = await tx
-      .insert(visibilityScoreRuns)
-      .values({
-        orgId: opts.orgId,
-        userId: opts.userId ?? null,
-        brandId: opts.brandId,
-        campaignId: opts.campaignId ?? null,
-        featureSlug: opts.featureSlug ?? null,
-        workflowSlug: opts.workflowSlug ?? null,
-        parentRunId: opts.parentRunId ?? null,
-        runId: opts.runId,
-        aggregateRunId: null,
-        judgeKind: "aggregate",
-        domain,
-        brandName,
-        llmProvider: "aggregate",
-        llmModel: opts.judges.map((j) => `${j.provider}/${j.model}`).join(","),
-        promptGenModel: opts.promptGenModel,
-        extractionProvider: opts.extractionProvider,
-        extractionModel: opts.extractionModel,
-        nPrompts: opts.nPrompts,
-        weights: opts.weights,
-        brandMentionCount: aggregateMetrics.brand_mention_count,
-        brandMentionRate: dec(aggregateMetrics.brand_mention_rate),
-        urlMentionCount: aggregateMetrics.url_mention_count,
-        urlMentionRate: dec(aggregateMetrics.url_mention_rate),
-        brandAndUrlCount: aggregateMetrics.brand_and_url_count,
-        brandAndUrlRate: dec(aggregateMetrics.brand_and_url_rate),
-        avgPosition: dec(aggregateMetrics.avg_position),
-        positionScore: dec(aggregateMetrics.position_score),
-        shareOfVoice: dec(aggregateMetrics.share_of_voice),
-        weightedShareOfVoice: dec(aggregateMetrics.weighted_share_of_voice),
-        citationCount: aggregateMetrics.citation_count,
-        citationRate: dec(aggregateMetrics.citation_rate),
-        citationShareOfVoice: dec(aggregateMetrics.citation_share_of_voice),
-        positiveCount: aggregateMetrics.positive_count,
-        neutralCount: aggregateMetrics.neutral_count,
-        negativeCount: aggregateMetrics.negative_count,
-        netSentiment: dec(aggregateMetrics.net_sentiment),
-        avgSentimentScore: dec(aggregateMetrics.avg_sentiment_score),
-        avgResponseLength: aggregateMetrics.avg_response_length,
-        responseLengthWhenBrandFound: aggregateMetrics.response_length_when_brand_found,
-        responseLengthWhenBrandNotFound: aggregateMetrics.response_length_when_brand_not_found,
-        distinctCompetitorsCount: aggregateMetrics.distinct_competitors_count,
-        visibilityScore: dec(aggregateMetrics.visibility_score),
-        promptGenSystemPrompt: promptGen.systemPrompt,
-        promptGenUserMessage: promptGen.userMessage,
-        status: "completed",
-        error: aggregateError,
-        startedAt,
-        completedAt,
-      })
-      .returning();
-
-    // 2. Insert one child row per judge (success OR failure).
-    const judgeRuns: JudgeRunResult[] = [];
-    for (const exec of judgeExecutions) {
-      const isOk = exec.kind === "ok";
-      const m = isOk ? exec.metrics : null;
-      const [childRow] = await tx
-        .insert(visibilityScoreRuns)
-        .values({
-          orgId: opts.orgId,
-          userId: opts.userId ?? null,
-          brandId: opts.brandId,
-          campaignId: opts.campaignId ?? null,
-          featureSlug: opts.featureSlug ?? null,
-          workflowSlug: opts.workflowSlug ?? null,
-          parentRunId: opts.parentRunId ?? null,
-          runId: opts.runId,
-          aggregateRunId: parentRow.id,
-          judgeKind: "per_provider",
-          domain,
-          brandName,
-          llmProvider: exec.judge.provider,
-          llmModel: exec.judge.model,
-          promptGenModel: opts.promptGenModel,
-          extractionProvider: opts.extractionProvider,
-          extractionModel: opts.extractionModel,
-          nPrompts: opts.nPrompts,
-          weights: opts.weights,
-          brandMentionCount: m?.brand_mention_count ?? null,
-          brandMentionRate: m ? dec(m.brand_mention_rate) : null,
-          urlMentionCount: m?.url_mention_count ?? null,
-          urlMentionRate: m ? dec(m.url_mention_rate) : null,
-          brandAndUrlCount: m?.brand_and_url_count ?? null,
-          brandAndUrlRate: m ? dec(m.brand_and_url_rate) : null,
-          avgPosition: m ? dec(m.avg_position) : null,
-          positionScore: m ? dec(m.position_score) : null,
-          shareOfVoice: m ? dec(m.share_of_voice) : null,
-          weightedShareOfVoice: m ? dec(m.weighted_share_of_voice) : null,
-          citationCount: m?.citation_count ?? null,
-          citationRate: m ? dec(m.citation_rate) : null,
-          citationShareOfVoice: m ? dec(m.citation_share_of_voice) : null,
-          positiveCount: m?.positive_count ?? null,
-          neutralCount: m?.neutral_count ?? null,
-          negativeCount: m?.negative_count ?? null,
-          netSentiment: m ? dec(m.net_sentiment) : null,
-          avgSentimentScore: m ? dec(m.avg_sentiment_score) : null,
-          avgResponseLength: m?.avg_response_length ?? null,
-          responseLengthWhenBrandFound: m?.response_length_when_brand_found ?? null,
-          responseLengthWhenBrandNotFound: m?.response_length_when_brand_not_found ?? null,
-          distinctCompetitorsCount: m?.distinct_competitors_count ?? null,
-          visibilityScore: m ? dec(m.visibility_score) : null,
-          promptGenSystemPrompt: promptGen.systemPrompt,
-          promptGenUserMessage: promptGen.userMessage,
-          status: isOk ? "completed" : "failed",
-          error: isOk
-            ? exec.partialFailures > 0
-              ? `partial: ${exec.partialFailures}/${opts.nPrompts} prompts failed`
-              : null
-            : exec.error.message,
-          startedAt: exec.startedAt,
-          completedAt: exec.completedAt,
-        })
-        .returning();
-
-      let promptRows: (typeof visibilityScorePrompts.$inferSelect)[] = [];
-      let competitorRows: (typeof visibilityScoreCompetitors.$inferSelect)[] = [];
-
-      if (exec.kind === "ok") {
-        promptRows = await tx
-          .insert(visibilityScorePrompts)
-          .values(
-            exec.extracted.map((p) => ({
-              runIdFk: childRow.id,
-              orgId: opts.orgId,
-              promptIndex: p.promptIndex,
-              promptText: p.promptText,
-              judgeSystemPrompt: p.judgeSystemPrompt,
-              judgeUserMessage: p.judgeUserMessage,
-              extractorSystemPrompt: p.extractorSystemPrompt,
-              extractorUserMessage: p.extractorUserMessage,
-              responseText: p.responseText,
-              responseLengthChars: p.responseLengthChars,
-              brandFound: p.brandFound,
-              brandCount: p.brandCount,
-              brandPosition: p.brandPosition,
-              urlFound: p.urlFound,
-              urlCount: p.urlCount,
-              brandAndUrlCoOccurrence: p.brandAndUrlCoOccurrence,
-              maxBrandsInResponse: p.maxBrandsInResponse,
-              sentiment: p.sentiment,
-              sentimentScore: dec(p.sentimentScore),
-              citationUrls: p.citationUrls,
-              latencyMs: p.latencyMs,
-              tokensInput: p.tokensInput,
-              tokensOutput: p.tokensOutput,
-            })),
-          )
-          .returning();
-
-        const competitorValues = exec.extracted.flatMap((p, i) =>
-          p.competitors.map((c) => ({
-            runIdFk: childRow.id,
-            promptIdFk: promptRows[i].id,
-            orgId: opts.orgId,
-            competitorName: c.name,
-            competitorUrl: c.url,
-            position: c.position,
-            sentiment: c.sentiment,
-            sentimentScore: dec(c.sentimentScore),
-            citationUrl: c.citationUrl,
-          })),
-        );
-
-        competitorRows =
-          competitorValues.length === 0
-            ? []
-            : await tx.insert(visibilityScoreCompetitors).values(competitorValues).returning();
-      }
-
-      judgeRuns.push({
-        judge: exec.judge,
-        run: childRow,
-        prompts: promptRows,
-        competitors: competitorRows,
-        metrics: exec.kind === "ok" ? exec.metrics : ({} as AggregateMetrics),
-      });
-    }
-
-    return { parentRow, judgeRuns };
+  // Flip the parent to its terminal state with the merged metrics across judges.
+  const parentRow = await flipRunCompleted({
+    parentId: parent.id,
+    domain,
+    brandName,
+    metrics: aggregateMetrics,
+    error: aggregateError,
+    promptGen,
+    completedAt,
   });
 
   // Persist the Ahrefs snapshot linked to the aggregate run. Awaited (the fetch
@@ -790,7 +651,7 @@ async function runVisibilityScoreInner(
       featureSlug: opts.featureSlug,
       workflowSlug: opts.workflowSlug,
       runId: opts.runId,
-      aggregateRunId: persisted.parentRow.id,
+      aggregateRunId: parentRow.id,
       domain,
       brandName,
     },
@@ -798,9 +659,204 @@ async function runVisibilityScoreInner(
   );
 
   return {
-    run: persisted.parentRow,
+    run: parentRow,
     metrics: aggregateMetrics,
-    byProvider: persisted.judgeRuns,
+    byProvider: judgeResults.map((r) => r.persisted),
     ahrefs,
   };
+}
+
+/**
+ * Persist one judge's child run + its prompts + competitors in a single transaction,
+ * independent of the other judges. Called as each judge completes so a finished judge's
+ * (paid-for) results survive even if the process dies before the others finish. A failed
+ * judge still gets a `failed` child row (no prompts) for diagnostics.
+ */
+async function persistJudgeRun(
+  exec: JudgeExecution,
+  opts: RunOptions,
+  parentDbId: string,
+  domain: string,
+  brandName: string,
+  promptGen: { systemPrompt: string; userMessage: string },
+): Promise<JudgeRunResult> {
+  const isOk = exec.kind === "ok";
+  const m = isOk ? exec.metrics : null;
+  return await db.transaction(async (tx) => {
+    const [childRow] = await tx
+      .insert(visibilityScoreRuns)
+      .values({
+        orgId: opts.orgId,
+        userId: opts.userId ?? null,
+        brandId: opts.brandId,
+        campaignId: opts.campaignId ?? null,
+        featureSlug: opts.featureSlug ?? null,
+        workflowSlug: opts.workflowSlug ?? null,
+        parentRunId: opts.parentRunId ?? null,
+        runId: opts.runId,
+        aggregateRunId: parentDbId,
+        judgeKind: "per_provider",
+        domain,
+        brandName,
+        llmProvider: exec.judge.provider,
+        llmModel: exec.judge.model,
+        promptGenModel: opts.promptGenModel,
+        extractionProvider: opts.extractionProvider,
+        extractionModel: opts.extractionModel,
+        nPrompts: opts.nPrompts,
+        weights: opts.weights,
+        brandMentionCount: m?.brand_mention_count ?? null,
+        brandMentionRate: m ? dec(m.brand_mention_rate) : null,
+        urlMentionCount: m?.url_mention_count ?? null,
+        urlMentionRate: m ? dec(m.url_mention_rate) : null,
+        brandAndUrlCount: m?.brand_and_url_count ?? null,
+        brandAndUrlRate: m ? dec(m.brand_and_url_rate) : null,
+        avgPosition: m ? dec(m.avg_position) : null,
+        positionScore: m ? dec(m.position_score) : null,
+        shareOfVoice: m ? dec(m.share_of_voice) : null,
+        weightedShareOfVoice: m ? dec(m.weighted_share_of_voice) : null,
+        citationCount: m?.citation_count ?? null,
+        citationRate: m ? dec(m.citation_rate) : null,
+        citationShareOfVoice: m ? dec(m.citation_share_of_voice) : null,
+        positiveCount: m?.positive_count ?? null,
+        neutralCount: m?.neutral_count ?? null,
+        negativeCount: m?.negative_count ?? null,
+        netSentiment: m ? dec(m.net_sentiment) : null,
+        avgSentimentScore: m ? dec(m.avg_sentiment_score) : null,
+        avgResponseLength: m?.avg_response_length ?? null,
+        responseLengthWhenBrandFound: m?.response_length_when_brand_found ?? null,
+        responseLengthWhenBrandNotFound: m?.response_length_when_brand_not_found ?? null,
+        distinctCompetitorsCount: m?.distinct_competitors_count ?? null,
+        visibilityScore: m ? dec(m.visibility_score) : null,
+        promptGenSystemPrompt: promptGen.systemPrompt,
+        promptGenUserMessage: promptGen.userMessage,
+        status: isOk ? "completed" : "failed",
+        error: isOk
+          ? exec.partialFailures > 0
+            ? `partial: ${exec.partialFailures}/${opts.nPrompts} prompts failed`
+            : null
+          : exec.error.message,
+        startedAt: exec.startedAt,
+        completedAt: exec.completedAt,
+      })
+      .returning();
+
+    let promptRows: (typeof visibilityScorePrompts.$inferSelect)[] = [];
+    let competitorRows: (typeof visibilityScoreCompetitors.$inferSelect)[] = [];
+
+    if (exec.kind === "ok") {
+      promptRows = await tx
+        .insert(visibilityScorePrompts)
+        .values(
+          exec.extracted.map((p) => ({
+            runIdFk: childRow.id,
+            orgId: opts.orgId,
+            promptIndex: p.promptIndex,
+            promptText: p.promptText,
+            judgeSystemPrompt: p.judgeSystemPrompt,
+            judgeUserMessage: p.judgeUserMessage,
+            extractorSystemPrompt: p.extractorSystemPrompt,
+            extractorUserMessage: p.extractorUserMessage,
+            responseText: p.responseText,
+            responseLengthChars: p.responseLengthChars,
+            brandFound: p.brandFound,
+            brandCount: p.brandCount,
+            brandPosition: p.brandPosition,
+            urlFound: p.urlFound,
+            urlCount: p.urlCount,
+            brandAndUrlCoOccurrence: p.brandAndUrlCoOccurrence,
+            maxBrandsInResponse: p.maxBrandsInResponse,
+            sentiment: p.sentiment,
+            sentimentScore: dec(p.sentimentScore),
+            citationUrls: p.citationUrls,
+            latencyMs: p.latencyMs,
+            tokensInput: p.tokensInput,
+            tokensOutput: p.tokensOutput,
+          })),
+        )
+        .returning();
+
+      const competitorValues = exec.extracted.flatMap((p, i) =>
+        p.competitors.map((c) => ({
+          runIdFk: childRow.id,
+          promptIdFk: promptRows[i].id,
+          orgId: opts.orgId,
+          competitorName: c.name,
+          competitorUrl: c.url,
+          position: c.position,
+          sentiment: c.sentiment,
+          sentimentScore: dec(c.sentimentScore),
+          citationUrl: c.citationUrl,
+        })),
+      );
+
+      competitorRows =
+        competitorValues.length === 0
+          ? []
+          : await tx.insert(visibilityScoreCompetitors).values(competitorValues).returning();
+    }
+
+    return {
+      judge: exec.judge,
+      run: childRow,
+      prompts: promptRows,
+      competitors: competitorRows,
+      metrics: exec.kind === "ok" ? exec.metrics : ({} as AggregateMetrics),
+    };
+  });
+}
+
+/**
+ * Flip the aggregate parent (already `running`) to `completed`, writing the merged
+ * metrics across all successful judges. Returns the updated parent row. A partial run
+ * (some judges failed) is still `completed` with `error` set to a "partial: ..." note —
+ * matching the prior convention.
+ */
+async function flipRunCompleted(args: {
+  parentId: string;
+  domain: string;
+  brandName: string;
+  metrics: AggregateMetrics;
+  error: string | null;
+  promptGen: { systemPrompt: string; userMessage: string };
+  completedAt: Date;
+}): Promise<typeof visibilityScoreRuns.$inferSelect> {
+  const { parentId, domain, brandName, metrics, error, promptGen, completedAt } = args;
+  const [row] = await db
+    .update(visibilityScoreRuns)
+    .set({
+      domain,
+      brandName,
+      brandMentionCount: metrics.brand_mention_count,
+      brandMentionRate: dec(metrics.brand_mention_rate),
+      urlMentionCount: metrics.url_mention_count,
+      urlMentionRate: dec(metrics.url_mention_rate),
+      brandAndUrlCount: metrics.brand_and_url_count,
+      brandAndUrlRate: dec(metrics.brand_and_url_rate),
+      avgPosition: dec(metrics.avg_position),
+      positionScore: dec(metrics.position_score),
+      shareOfVoice: dec(metrics.share_of_voice),
+      weightedShareOfVoice: dec(metrics.weighted_share_of_voice),
+      citationCount: metrics.citation_count,
+      citationRate: dec(metrics.citation_rate),
+      citationShareOfVoice: dec(metrics.citation_share_of_voice),
+      positiveCount: metrics.positive_count,
+      neutralCount: metrics.neutral_count,
+      negativeCount: metrics.negative_count,
+      netSentiment: dec(metrics.net_sentiment),
+      avgSentimentScore: dec(metrics.avg_sentiment_score),
+      avgResponseLength: metrics.avg_response_length,
+      responseLengthWhenBrandFound: metrics.response_length_when_brand_found,
+      responseLengthWhenBrandNotFound: metrics.response_length_when_brand_not_found,
+      distinctCompetitorsCount: metrics.distinct_competitors_count,
+      visibilityScore: dec(metrics.visibility_score),
+      promptGenSystemPrompt: promptGen.systemPrompt,
+      promptGenUserMessage: promptGen.userMessage,
+      status: "completed",
+      error,
+      completedAt,
+    })
+    .where(eq(visibilityScoreRuns.id, parentId))
+    .returning();
+  return row;
 }
