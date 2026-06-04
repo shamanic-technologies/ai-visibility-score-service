@@ -8,6 +8,13 @@ import {
 } from "../db/schema.js";
 import { extractBrandFields } from "./brand-client.js";
 import { chatComplete, type ChatModel, type ChatProvider, type ChatTrackingHeaders } from "./chat-client.js";
+import type { AhrefTrackingHeaders } from "./ahref-client.js";
+import {
+  fetchAhrefSnapshotSafe,
+  persistAhrefSnapshot,
+  type AhrefFetchOutcome,
+  type AhrefSnapshotResult,
+} from "./ahref-snapshot.js";
 import { generatePrompts, SYSTEM_PROMPT as PROMPT_GEN_SYSTEM_PROMPT, type BrandContext } from "./prompt-gen.js";
 import { cacheLookup, cacheWrite, computeSystemPromptHash } from "./prompt-cache.js";
 import { extractFromResponse } from "./extractor.js";
@@ -56,6 +63,12 @@ export interface RunResult {
   run: typeof visibilityScoreRuns.$inferSelect;
   metrics: AggregateMetrics;
   byProvider: JudgeRunResult[];
+  /**
+   * Raw Ahrefs Brand-Radar AI-visibility snapshot for the brand domain at run
+   * time. Supplementary to the LLM score; null if the snapshot could not be
+   * persisted. A failed Ahrefs fetch still yields a row with status="failed".
+   */
+  ahrefs: AhrefSnapshotResult | null;
 }
 
 function asString(v: unknown): string | undefined {
@@ -303,6 +316,24 @@ async function runVisibilityScoreInner(
   const domain = brand.domain;
   onBrandResolved(domain, brandName);
 
+  // Kick off the Ahrefs Brand-Radar fetch in parallel with the judges so it
+  // adds no wall-clock latency beyond the slower of the two. Fail-soft: the
+  // outcome is captured (completed/failed) and persisted after the run is
+  // stored — it never blocks or fails the visibility score.
+  const ahrefTracking: AhrefTrackingHeaders = {
+    orgId: opts.orgId,
+    userId: opts.userId,
+    runId: opts.runId,
+    brandId: opts.brandId,
+    campaignId: opts.campaignId,
+    featureSlug: opts.featureSlug,
+    workflowSlug: opts.workflowSlug,
+  };
+  const ahrefOutcomePromise: Promise<AhrefFetchOutcome> = fetchAhrefSnapshotSafe(
+    domain,
+    ahrefTracking,
+  );
+
   const ctx: BrandContext = {
     category: asString(brandResp.fields["category"]?.value),
     specific_offerings: asString(brandResp.fields["specific_offerings"]?.value),
@@ -546,9 +577,29 @@ async function runVisibilityScoreInner(
     return { parentRow, judgeRuns };
   });
 
+  // Persist the Ahrefs snapshot linked to the aggregate run. Awaited (the fetch
+  // already ran in parallel with the judges) but never throws.
+  const ahrefOutcome = await ahrefOutcomePromise;
+  const ahrefs = await persistAhrefSnapshot(
+    {
+      orgId: opts.orgId,
+      userId: opts.userId,
+      brandId: opts.brandId,
+      campaignId: opts.campaignId,
+      featureSlug: opts.featureSlug,
+      workflowSlug: opts.workflowSlug,
+      runId: opts.runId,
+      aggregateRunId: persisted.parentRow.id,
+      domain,
+      brandName,
+    },
+    ahrefOutcome,
+  );
+
   return {
     run: persisted.parentRow,
     metrics: aggregateMetrics,
     byProvider: persisted.judgeRuns,
+    ahrefs,
   };
 }

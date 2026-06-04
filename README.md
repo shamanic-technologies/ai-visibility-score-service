@@ -13,9 +13,13 @@ A caller (dashboard, n8n workflow, etc.) sends a list of brand IDs, the service:
 4. Extracts structured per-response data (brand found, position, sentiment, competitors,
    citations) via `chat-service` using a strict-JSON model (default `google` / `pro`).
 5. Aggregates the responses into a **visibility score (0–100)** plus a full metric bundle.
-6. Persists run + per-prompt + per-competitor rows.
-7. Returns the full bundle (run row + prompt rows + competitor rows + computed
-   `top_competitors` and `citation_opportunities`).
+6. In parallel with the judges, pulls the brand domain's raw **Ahrefs Brand-Radar**
+   AI-visibility stats from `ahref-service` (global mention count + per-AI-engine
+   breakdown + top cited competitor brands). Fail-soft: a failed fetch is recorded as
+   a snapshot row with `status="failed"` and never blocks the score.
+7. Persists run + per-prompt + per-competitor rows + one Ahrefs snapshot row.
+8. Returns the full bundle (run row + prompt rows + competitor rows + computed
+   `top_competitors` and `citation_opportunities` + the `ahrefs` snapshot).
 
 ## Endpoints
 
@@ -179,7 +183,7 @@ Adding a new judge (e.g. OpenAI) requires only appending to `VISIBILITY_RUN_CONF
 
 ## Schema
 
-Three tables, all with `org_id` for tenant isolation:
+Four tables, all with `org_id` for tenant isolation:
 
 - `visibility_score_runs` — one row per (brand × audit attempt × judge), plus one
   aggregate parent row per audit. The two row kinds are distinguished by
@@ -195,6 +199,13 @@ Three tables, all with `org_id` for tenant isolation:
   `brand_name` may also be null if the pipeline failed before brand-service resolved).
 - `visibility_score_prompts` — `nPrompts` rows per run. Per-prompt response + extraction.
 - `visibility_score_competitors` — one row per competitor mention per prompt.
+- `visibility_ahrefs_snapshots` — one row per run holding the brand domain's raw
+  **Ahrefs Brand-Radar** AI-visibility stats from `ahref-service`: `mentions_total`
+  (global), `mentions_by_engine` (jsonb per-AI-engine), `top_competitors` (jsonb, by
+  citation count), and the full upstream payload in `raw`. `aggregate_run_id` links it
+  to the aggregate run. Raw counts only — no score. `status='failed'` + `error` when the
+  fetch failed; the visibility run still succeeds. Kept flat + raw for time-series:
+  a snapshot means little alone, the week-over-week deltas are the value.
 
 See `src/db/schema.ts` for the full column list. Migrations are auto-applied at boot
 (`drizzle-orm/postgres-js/migrator`).
@@ -211,6 +222,8 @@ See `src/db/schema.ts` for the full column list. Migrations are auto-applied at 
 | `BRAND_SERVICE_API_KEY` | ✅ | Outbound key for brand-service |
 | `RUNS_SERVICE_URL` | ✅ | Base URL for runs-service |
 | `RUNS_SERVICE_API_KEY` | ✅ | Outbound key for runs-service |
+| `AHREF_SERVICE_URL` | ✅ | Base URL for ahref-service (Ahrefs Brand-Radar AI-visibility) |
+| `AHREF_SERVICE_API_KEY` | ✅ | Outbound key for ahref-service |
 | `PORT` | optional | default `8080` |
 
 The service crashes loudly at startup if any required variable is missing.

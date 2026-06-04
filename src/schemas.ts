@@ -233,6 +233,44 @@ export const ByProviderResultSchema = z
   })
   .openapi("VisibilityScoreByProviderResult");
 
+export const AhrefEngineMentionSchema = z
+  .object({
+    engine: z.string().openapi({ description: "AI search engine key (lower-snake-case, e.g. `chatgpt`, `perplexity`)." }),
+    mentions: z.number().openapi({ description: "Brand mentions in this engine." }),
+  })
+  .openapi("AhrefEngineMention");
+
+export const AhrefTopCompetitorSchema = z
+  .object({
+    brand: z.string(),
+    domain: z.string().nullable(),
+    citations: z.number().openapi({ description: "Global citation count for this competitor brand." }),
+  })
+  .openapi("AhrefTopCompetitor");
+
+export const AhrefSnapshotSchema = z
+  .object({
+    id: z.string().uuid(),
+    status: z.enum(["completed", "failed"]).openapi({
+      description: "`completed` = Ahrefs returned data. `failed` = fetch failed (see `error`); the visibility run still succeeded.",
+    }),
+    domain: z.string(),
+    snapshotDate: z.string().nullable().openapi({
+      description: "Date the Ahrefs data reflects (distinct from `createdAt`).",
+    }),
+    fetchedFromCache: z.boolean().nullable(),
+    mentionsTotal: z.number().nullable().openapi({
+      description: "Global brand mentions across all AI engines. Raw count — not a score.",
+    }),
+    mentionsByEngine: z.array(AhrefEngineMentionSchema).nullable(),
+    topCompetitors: z.array(AhrefTopCompetitorSchema).nullable().openapi({
+      description: "Top competitor brands by global citation count.",
+    }),
+    error: z.string().nullable(),
+    createdAt: z.string(),
+  })
+  .openapi("AhrefSnapshot");
+
 export const RunResultSchema = z
   .object({
     run: RunRowSchema.openapi({
@@ -246,6 +284,10 @@ export const RunResultSchema = z
     }),
     citation_opportunities: z.array(CitationOpportunitySchema).openapi({
       description: "Citation domains unioned across all judges.",
+    }),
+    ahrefs: AhrefSnapshotSchema.nullable().optional().openapi({
+      description:
+        "Raw Ahrefs Brand-Radar AI-visibility snapshot for the brand domain at run time (mentions global + per-engine + top cited competitors). Supplementary to the LLM score; null when not persisted. Present on POST run responses.",
     }),
   })
   .openapi("VisibilityScoreRunResult");
