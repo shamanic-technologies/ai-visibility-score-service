@@ -84,6 +84,76 @@
               "$ref": "#/components/schemas/CitationOpportunity"
             },
             "description": "Citation domains unioned across all judges."
+          },
+          "ahrefs": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "completed",
+                  "failed"
+                ],
+                "description": "`completed` = Ahrefs returned data. `failed` = fetch failed (see `error`); the visibility run still succeeded."
+              },
+              "domain": {
+                "type": "string"
+              },
+              "snapshotDate": {
+                "type": "string",
+                "nullable": true,
+                "description": "Date the Ahrefs data reflects (distinct from `createdAt`)."
+              },
+              "fetchedFromCache": {
+                "type": "boolean",
+                "nullable": true
+              },
+              "mentionsTotal": {
+                "type": "number",
+                "nullable": true,
+                "description": "Global brand mentions across all AI engines. Raw count — not a score."
+              },
+              "mentionsByEngine": {
+                "type": "array",
+                "nullable": true,
+                "items": {
+                  "$ref": "#/components/schemas/AhrefEngineMention"
+                }
+              },
+              "topCompetitors": {
+                "type": "array",
+                "nullable": true,
+                "items": {
+                  "$ref": "#/components/schemas/AhrefTopCompetitor"
+                },
+                "description": "Top competitor brands by global citation count."
+              },
+              "error": {
+                "type": "string",
+                "nullable": true
+              },
+              "createdAt": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "status",
+              "domain",
+              "snapshotDate",
+              "fetchedFromCache",
+              "mentionsTotal",
+              "mentionsByEngine",
+              "topCompetitors",
+              "error",
+              "createdAt"
+            ],
+            "description": "Raw Ahrefs Brand-Radar AI-visibility snapshot for the brand domain at run time (mentions global + per-engine + top cited competitors). Supplementary to the LLM score; null when not persisted. Present on POST run responses."
           }
         },
         "required": [
@@ -572,6 +642,44 @@
         "required": [
           "domain",
           "count"
+        ]
+      },
+      "AhrefEngineMention": {
+        "type": "object",
+        "properties": {
+          "engine": {
+            "type": "string",
+            "description": "AI search engine key (lower-snake-case, e.g. `chatgpt`, `perplexity`)."
+          },
+          "mentions": {
+            "type": "number",
+            "description": "Brand mentions in this engine."
+          }
+        },
+        "required": [
+          "engine",
+          "mentions"
+        ]
+      },
+      "AhrefTopCompetitor": {
+        "type": "object",
+        "properties": {
+          "brand": {
+            "type": "string"
+          },
+          "domain": {
+            "type": "string",
+            "nullable": true
+          },
+          "citations": {
+            "type": "number",
+            "description": "Global citation count for this competitor brand."
+          }
+        },
+        "required": [
+          "brand",
+          "domain",
+          "citations"
         ]
       },
       "ValidationErrorResponse": {

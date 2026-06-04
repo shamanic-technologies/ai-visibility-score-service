@@ -11,6 +11,8 @@ describe("assertEnv", () => {
     BRAND_SERVICE_API_KEY: "k",
     RUNS_SERVICE_URL: "u",
     RUNS_SERVICE_API_KEY: "k",
+    AHREF_SERVICE_URL: "u",
+    AHREF_SERVICE_API_KEY: "k",
   } as NodeJS.ProcessEnv;
 
   it("does not throw when all required env present", () => {
