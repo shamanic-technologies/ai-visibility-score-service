@@ -121,7 +121,7 @@ Default weights: `0.25 / 0.15 / 0.20 / 0.20 / 0.15 / 0.05` (sums to 1.0).
 
 The service audits each brand against **multiple judge LLMs in parallel** and persists
 an aggregate result on top of the per-judge results. The set of judges is decided
-server-side in `src/lib/config.ts` (today: `google/pro` + `anthropic/opus`).
+server-side in `src/lib/config.ts` (today: `google/flash` + `anthropic/haiku`).
 
 ```
 brandId
