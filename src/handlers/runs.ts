@@ -6,8 +6,7 @@ import {
   visibilityScorePrompts,
   visibilityScoreCompetitors,
 } from "../db/schema.js";
-import { runVisibilityScore } from "../lib/run.js";
-import { aggregate, aggregateAcrossProviders } from "../lib/metrics.js";
+import { runVisibilityScore, loadRunBundle } from "../lib/run.js";
 import { VISIBILITY_RUN_CONFIG } from "../lib/config.js";
 import { RunRequestSchema, RunListQuerySchema } from "../schemas.js";
 
@@ -207,110 +206,22 @@ export async function getRun(req: Request, res: Response): Promise<void> {
     return;
   }
 
-  const children = await db
-    .select()
-    .from(visibilityScoreRuns)
-    .where(
-      and(eq(visibilityScoreRuns.aggregateRunId, parent.id), eq(visibilityScoreRuns.orgId, req.orgId)),
-    );
-
-  const byProvider = await Promise.all(
-    children.map(async (child) => {
-      const promptRows = await db
-        .select()
-        .from(visibilityScorePrompts)
-        .where(
-          and(
-            eq(visibilityScorePrompts.runIdFk, child.id),
-            eq(visibilityScorePrompts.orgId, req.orgId!),
-          ),
-        );
-
-      const competitorRows = await db
-        .select()
-        .from(visibilityScoreCompetitors)
-        .where(
-          and(
-            eq(visibilityScoreCompetitors.runIdFk, child.id),
-            eq(visibilityScoreCompetitors.orgId, req.orgId!),
-          ),
-        );
-
-      const extracted = promptRows
-        .slice()
-        .sort((a, b) => a.promptIndex - b.promptIndex)
-        .map((p) => ({
-          promptIndex: p.promptIndex,
-          promptText: p.promptText,
-          judgeSystemPrompt: p.judgeSystemPrompt ?? "",
-          judgeUserMessage: p.judgeUserMessage ?? "",
-          extractorSystemPrompt: p.extractorSystemPrompt ?? "",
-          extractorUserMessage: p.extractorUserMessage ?? "",
-          responseText: p.responseText,
-          responseLengthChars: p.responseLengthChars ?? p.responseText.length,
-          brandFound: p.brandFound ?? false,
-          brandCount: p.brandCount ?? 0,
-          brandPosition: p.brandPosition,
-          urlFound: p.urlFound ?? false,
-          urlCount: p.urlCount ?? 0,
-          brandAndUrlCoOccurrence: p.brandAndUrlCoOccurrence ?? false,
-          maxBrandsInResponse: p.maxBrandsInResponse ?? 0,
-          sentiment: (p.sentiment ?? "neutral") as "positive" | "neutral" | "negative",
-          sentimentScore: p.sentimentScore ? Number(p.sentimentScore) : 0,
-          citationUrls: p.citationUrls ?? [],
-          competitors: competitorRows
-            .filter((c) => c.promptIdFk === p.id)
-            .map((c) => ({
-              name: c.competitorName,
-              url: c.competitorUrl,
-              position: c.position ?? 0,
-              sentiment: (c.sentiment ?? "neutral") as "positive" | "neutral" | "negative",
-              sentimentScore: c.sentimentScore ? Number(c.sentimentScore) : 0,
-              citationUrl: c.citationUrl,
-            })),
-          latencyMs: p.latencyMs ?? 0,
-          tokensInput: p.tokensInput ?? 0,
-          tokensOutput: p.tokensOutput ?? 0,
-        }));
-
-      const childMetrics =
-        promptRows.length === 0
-          ? null
-          : aggregate(extracted, parent.domain ?? "", parent.weights);
-
-      return {
-        provider: child.llmProvider,
-        model: child.llmModel,
-        run: serializeRun(child),
-        prompts: promptRows.map(serializePrompt),
-        competitors: competitorRows.map(serializeCompetitor),
-        top_competitors: childMetrics?.top_competitors ?? [],
-        citation_opportunities: childMetrics?.citation_opportunities ?? [],
-        metrics: childMetrics,
-      };
-    }),
-  );
-
-  const successfulChildMetrics = byProvider
-    .map((b) => b.metrics)
-    .filter((m): m is NonNullable<typeof m> => m !== null);
-
-  const parentMerged =
-    successfulChildMetrics.length > 0 ? aggregateAcrossProviders(successfulChildMetrics) : null;
+  // Rebuild the bundle from persisted rows (shared with the 24h cache-hit path).
+  const bundle = await loadRunBundle(parent);
 
   res.json({
-    run: serializeRun(parent),
-    by_provider: byProvider.map((b) => ({
-      provider: b.provider,
-      model: b.model,
-      run: b.run,
-      prompts: b.prompts,
-      competitors: b.competitors,
-      top_competitors: b.top_competitors,
-      citation_opportunities: b.citation_opportunities,
+    run: serializeRun(bundle.run),
+    by_provider: bundle.byProvider.map((b) => ({
+      provider: b.judge.provider,
+      model: b.judge.model,
+      run: serializeRun(b.run),
+      prompts: b.prompts.map(serializePrompt),
+      competitors: b.competitors.map(serializeCompetitor),
+      top_competitors: b.metrics.top_competitors ?? [],
+      citation_opportunities: b.metrics.citation_opportunities ?? [],
     })),
-    top_competitors: parentMerged?.top_competitors ?? [],
-    citation_opportunities: parentMerged?.citation_opportunities ?? [],
+    top_competitors: bundle.metrics.top_competitors ?? [],
+    citation_opportunities: bundle.metrics.citation_opportunities ?? [],
   });
 }
 

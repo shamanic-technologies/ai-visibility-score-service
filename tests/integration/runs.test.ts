@@ -12,7 +12,10 @@ vi.mock("../../src/db/index.js", () => ({
 }));
 
 // Mock the orchestrator so we don't actually call external services
-vi.mock("../../src/lib/run.js", () => ({
+// Stub only runVisibilityScore (the LLM-driven path); keep loadRunBundle real so the
+// GET-by-id handler still rebuilds bundles from the mocked db.select rows.
+vi.mock("../../src/lib/run.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/lib/run.js")>()),
   runVisibilityScore: vi.fn(),
 }));
 
