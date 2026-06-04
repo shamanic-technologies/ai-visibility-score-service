@@ -269,9 +269,9 @@ describe("happy path POST /orgs/visibility-score-runs", () => {
       { provider: "anthropic", model: "sonnet" },
     ]);
     expect(callArg.promptGenProvider).toBe("google");
-    expect(callArg.promptGenModel).toBe("pro");
+    expect(callArg.promptGenModel).toBe("flash");
     expect(callArg.extractionProvider).toBe("google");
-    expect(callArg.extractionModel).toBe("pro");
+    expect(callArg.extractionModel).toBe("flash");
     expect(callArg.nPrompts).toBe(25);
     expect(callArg.brandId).toBe(BRAND_ID_1);
   });
