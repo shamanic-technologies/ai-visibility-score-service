@@ -28,6 +28,7 @@ export interface BrandTrackingHeaders {
   /** Single brand UUID — passed as `x-brand-id`. */
   brandId: string;
   campaignId?: string;
+  audienceId?: string;
   featureSlug?: string;
   workflowSlug?: string;
 }
@@ -51,6 +52,7 @@ function buildHeaders(tracking: BrandTrackingHeaders): Record<string, string> {
   };
   if (tracking.userId) headers["x-user-id"] = tracking.userId;
   if (tracking.campaignId) headers["x-campaign-id"] = tracking.campaignId;
+  if (tracking.audienceId) headers["x-audience-id"] = tracking.audienceId;
   if (tracking.featureSlug) headers["x-feature-slug"] = tracking.featureSlug;
   if (tracking.workflowSlug) headers["x-workflow-slug"] = tracking.workflowSlug;
   return headers;
