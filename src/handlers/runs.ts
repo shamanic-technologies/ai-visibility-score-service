@@ -54,6 +54,7 @@ export async function postRuns(req: Request, res: Response): Promise<void> {
       runId: req.runId,
       parentRunId: req.parentRunId,
       campaignId: req.campaignId,
+      audienceId: req.audienceId,
       featureSlug: req.featureSlug,
       workflowSlug: req.workflowSlug,
       judges: VISIBILITY_RUN_CONFIG.judges,

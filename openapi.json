@@ -886,6 +886,17 @@
           {
             "schema": {
               "type": "string",
+              "format": "uuid",
+              "description": "Optional priority-audience UUID, forwarded to downstream services + tagged on run/cost rows for per-audience cost attribution."
+            },
+            "required": false,
+            "description": "Optional priority-audience UUID, forwarded to downstream services + tagged on run/cost rows for per-audience cost attribution.",
+            "name": "x-audience-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
               "description": "Optional caller feature slug, forwarded to downstream services for tracking."
             },
             "required": false,
@@ -1103,6 +1114,17 @@
           {
             "schema": {
               "type": "string",
+              "format": "uuid",
+              "description": "Optional priority-audience UUID, forwarded to downstream services + tagged on run/cost rows for per-audience cost attribution."
+            },
+            "required": false,
+            "description": "Optional priority-audience UUID, forwarded to downstream services + tagged on run/cost rows for per-audience cost attribution.",
+            "name": "x-audience-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
               "description": "Optional caller feature slug, forwarded to downstream services for tracking."
             },
             "required": false,
@@ -1223,6 +1245,17 @@
             "required": false,
             "description": "Optional caller campaign UUID, forwarded to downstream chat-service / brand-service for tracking.",
             "name": "x-campaign-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Optional priority-audience UUID, forwarded to downstream services + tagged on run/cost rows for per-audience cost attribution."
+            },
+            "required": false,
+            "description": "Optional priority-audience UUID, forwarded to downstream services + tagged on run/cost rows for per-audience cost attribution.",
+            "name": "x-audience-id",
             "in": "header"
           },
           {

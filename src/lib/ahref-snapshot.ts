@@ -21,6 +21,7 @@ export interface AhrefSnapshotParams {
   userId?: string;
   brandId: string;
   campaignId?: string;
+  audienceId?: string;
   featureSlug?: string;
   workflowSlug?: string;
   /** This service's own runId. */
@@ -99,6 +100,7 @@ export async function persistAhrefSnapshot(
         userId: params.userId ?? null,
         brandId: params.brandId,
         campaignId: params.campaignId ?? null,
+        audienceId: params.audienceId ?? null,
         featureSlug: params.featureSlug ?? null,
         workflowSlug: params.workflowSlug ?? null,
         runId: params.runId,

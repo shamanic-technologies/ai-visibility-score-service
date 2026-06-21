@@ -57,6 +57,13 @@
       "when": 1780535197531,
       "tag": "0007_ahrefs_snapshots",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1782048456186,
+      "tag": "0008_audience_id_columns",
+      "breakpoints": true
     }
   ]
 }

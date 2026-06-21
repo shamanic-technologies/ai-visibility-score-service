@@ -47,6 +47,7 @@ export interface RunOptions {
   runId: string;
   parentRunId?: string;
   campaignId?: string;
+  audienceId?: string;
   featureSlug?: string;
   workflowSlug?: string;
 
@@ -133,6 +134,7 @@ async function insertRunningParent(
       userId: opts.userId ?? null,
       brandId: opts.brandId,
       campaignId: opts.campaignId ?? null,
+      audienceId: opts.audienceId ?? null,
       featureSlug: opts.featureSlug ?? null,
       workflowSlug: opts.workflowSlug ?? null,
       parentRunId: opts.parentRunId ?? null,
@@ -465,6 +467,7 @@ async function runVisibilityScoreInner(
     userId: opts.userId,
     runId: opts.runId,
     campaignId: opts.campaignId,
+    audienceId: opts.audienceId,
     featureSlug: opts.featureSlug,
     brandId: opts.brandId,
     workflowSlug: opts.workflowSlug,
@@ -504,6 +507,7 @@ async function runVisibilityScoreInner(
       runId: opts.runId,
       brandId: opts.brandId,
       campaignId: opts.campaignId,
+      audienceId: opts.audienceId,
       featureSlug: opts.featureSlug,
       workflowSlug: opts.workflowSlug,
     },
@@ -544,6 +548,7 @@ async function runVisibilityScoreInner(
     runId: opts.runId,
     brandId: opts.brandId,
     campaignId: opts.campaignId,
+    audienceId: opts.audienceId,
     featureSlug: opts.featureSlug,
     workflowSlug: opts.workflowSlug,
   };
@@ -648,6 +653,7 @@ async function runVisibilityScoreInner(
       userId: opts.userId,
       brandId: opts.brandId,
       campaignId: opts.campaignId,
+      audienceId: opts.audienceId,
       featureSlug: opts.featureSlug,
       workflowSlug: opts.workflowSlug,
       runId: opts.runId,
@@ -690,6 +696,7 @@ async function persistJudgeRun(
         userId: opts.userId ?? null,
         brandId: opts.brandId,
         campaignId: opts.campaignId ?? null,
+        audienceId: opts.audienceId ?? null,
         featureSlug: opts.featureSlug ?? null,
         workflowSlug: opts.workflowSlug ?? null,
         parentRunId: opts.parentRunId ?? null,
