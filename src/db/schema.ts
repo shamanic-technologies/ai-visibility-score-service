@@ -19,6 +19,7 @@ export const visibilityScoreRuns = pgTable(
     userId: uuid("user_id"),
     brandId: uuid("brand_id").notNull(),
     campaignId: uuid("campaign_id"),
+    audienceId: uuid("audience_id"),
     featureSlug: text("feature_slug"),
     workflowSlug: text("workflow_slug"),
     parentRunId: uuid("parent_run_id"),
@@ -75,6 +76,7 @@ export const visibilityScoreRuns = pgTable(
     index("vsr_domain_idx").on(t.domain),
     index("vsr_aggregate_run_id_idx").on(t.aggregateRunId),
     index("vsr_campaign_id_idx").on(t.campaignId),
+    index("vsr_audience_id_idx").on(t.audienceId),
   ],
 );
 
@@ -183,6 +185,7 @@ export const visibilityAhrefsSnapshots = pgTable(
     userId: uuid("user_id"),
     brandId: uuid("brand_id").notNull(),
     campaignId: uuid("campaign_id"),
+    audienceId: uuid("audience_id"),
     featureSlug: text("feature_slug"),
     workflowSlug: text("workflow_slug"),
     runId: uuid("run_id"),

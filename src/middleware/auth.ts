@@ -35,6 +35,7 @@ export function requireOrgId(req: Request, res: Response, next: NextFunction) {
   const userId = req.headers["x-user-id"];
   const parentRunId = req.headers["x-run-id"];
   const campaignId = req.headers["x-campaign-id"];
+  const audienceId = req.headers["x-audience-id"];
   const featureSlug = req.headers["x-feature-slug"];
   const brandIdHeader = req.headers["x-brand-id"];
   const workflowSlug = req.headers["x-workflow-slug"];
@@ -43,6 +44,10 @@ export function requireOrgId(req: Request, res: Response, next: NextFunction) {
   if (typeof userId === "string" && UUID_RE.test(userId)) req.userId = userId;
   if (typeof parentRunId === "string" && UUID_RE.test(parentRunId)) req.parentRunId = parentRunId;
   if (typeof campaignId === "string" && UUID_RE.test(campaignId)) req.campaignId = campaignId;
+  // x-audience-id: priority audience for per-audience cost attribution. Optional (absent
+  // off-campaign → omit, never throw). UUID-validated so we never forward a malformed value
+  // that would 400 runs-service.
+  if (typeof audienceId === "string" && UUID_RE.test(audienceId)) req.audienceId = audienceId;
   if (typeof featureSlug === "string") req.featureSlug = featureSlug;
   if (typeof workflowSlug === "string") req.workflowSlug = workflowSlug;
   if (typeof brandIdHeader === "string") {

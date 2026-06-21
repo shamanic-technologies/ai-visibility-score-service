@@ -17,6 +17,7 @@ export function withRunTracking(taskName: string) {
 
     const forward: ForwardHeaders = {};
     if (req.campaignId) forward.campaignId = req.campaignId;
+    if (req.audienceId) forward.audienceId = req.audienceId;
     if (req.featureSlug) forward.featureSlug = req.featureSlug;
     if (req.brandIdHeader) forward.brandId = req.brandIdHeader;
     if (req.workflowSlug) forward.workflowSlug = req.workflowSlug;

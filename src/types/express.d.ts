@@ -8,6 +8,7 @@ declare global {
       parentRunId?: string;
       runId?: string;
       campaignId?: string;
+      audienceId?: string;
       featureSlug?: string;
       brandIdHeader?: string;
       brandIds?: string[];

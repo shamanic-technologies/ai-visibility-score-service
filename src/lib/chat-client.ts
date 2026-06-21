@@ -33,6 +33,7 @@ export interface ChatTrackingHeaders {
   /** Outbound x-run-id — this service's own runId (NOT the inbound parent). */
   runId: string;
   campaignId?: string;
+  audienceId?: string;
   featureSlug?: string;
   brandId?: string;
   workflowSlug?: string;
@@ -56,6 +57,7 @@ function buildHeaders(tracking: ChatTrackingHeaders): Record<string, string> {
   };
   if (tracking.userId) headers["x-user-id"] = tracking.userId;
   if (tracking.campaignId) headers["x-campaign-id"] = tracking.campaignId;
+  if (tracking.audienceId) headers["x-audience-id"] = tracking.audienceId;
   if (tracking.featureSlug) headers["x-feature-slug"] = tracking.featureSlug;
   if (tracking.brandId) headers["x-brand-id"] = tracking.brandId;
   if (tracking.workflowSlug) headers["x-workflow-slug"] = tracking.workflowSlug;
