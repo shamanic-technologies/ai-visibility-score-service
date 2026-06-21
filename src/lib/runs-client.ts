@@ -18,6 +18,7 @@ export interface RunIdentity {
 
 export interface ForwardHeaders {
   campaignId?: string;
+  audienceId?: string;
   featureSlug?: string;
   brandId?: string;
   workflowSlug?: string;
@@ -41,6 +42,7 @@ function buildHeaders(identity: RunIdentity, forward?: ForwardHeaders): Record<s
   if (identity.userId) headers["x-user-id"] = identity.userId;
   if (identity.parentRunId) headers["x-run-id"] = identity.parentRunId;
   if (forward?.campaignId) headers["x-campaign-id"] = forward.campaignId;
+  if (forward?.audienceId) headers["x-audience-id"] = forward.audienceId;
   if (forward?.featureSlug) headers["x-feature-slug"] = forward.featureSlug;
   if (forward?.brandId) headers["x-brand-id"] = forward.brandId;
   if (forward?.workflowSlug) headers["x-workflow-slug"] = forward.workflowSlug;

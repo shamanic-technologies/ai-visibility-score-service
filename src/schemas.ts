@@ -15,6 +15,9 @@ const orgScopedHeadersBase = {
   "x-campaign-id": z.string().uuid().optional().openapi({
     description: "Optional caller campaign UUID, forwarded to downstream chat-service / brand-service for tracking.",
   }),
+  "x-audience-id": z.string().uuid().optional().openapi({
+    description: "Optional priority-audience UUID, forwarded to downstream services + tagged on run/cost rows for per-audience cost attribution.",
+  }),
   "x-feature-slug": z.string().optional().openapi({
     description: "Optional caller feature slug, forwarded to downstream services for tracking.",
   }),
