@@ -7,6 +7,7 @@ import {
   visibilityScoreCompetitors,
 } from "../db/schema.js";
 import { runVisibilityScore, loadRunBundle } from "../lib/run.js";
+import { reapStaleRuns } from "../lib/reaper.js";
 import { VISIBILITY_RUN_CONFIG } from "../lib/config.js";
 import { RunRequestSchema, RunListQuerySchema } from "../schemas.js";
 
@@ -109,6 +110,11 @@ export async function listRuns(req: Request, res: Response): Promise<void> {
 
   const limit = parsed.data.limit ?? 50;
   const offset = parsed.data.offset ?? 0;
+
+  // Reap stuck `running` rows on-read so the list never shows a phantom in-flight run.
+  // This is the only place stale runs get cleaned (no background timer) — see reapStaleRuns.
+  await reapStaleRuns();
+
   // List endpoint returns aggregate (parent) rows only — children are accessed via GET /:id.
   const filters = [
     eq(visibilityScoreRuns.orgId, req.orgId),

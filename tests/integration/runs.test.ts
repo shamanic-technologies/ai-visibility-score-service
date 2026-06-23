@@ -6,6 +6,7 @@ vi.mock("../../src/db/index.js", () => ({
   db: {
     select: vi.fn(),
     insert: vi.fn(),
+    update: vi.fn(),
     transaction: vi.fn(),
   },
   client: {},
@@ -68,6 +69,16 @@ beforeEach(() => {
 afterEach(() => {
   vi.clearAllMocks();
 });
+
+// listRuns reaps stale runs on-read via db.update(...).set(...).where(...).returning().
+// Stub that chain to a no-op (no stuck rows) and expose the spy for assertions.
+function mockReapNoop() {
+  const returning = vi.fn().mockResolvedValue([]);
+  const where = vi.fn(() => ({ returning }));
+  const set = vi.fn(() => ({ where }));
+  vi.mocked(db.update).mockReturnValue({ set } as any);
+  return { set };
+}
 
 // Flattens a Drizzle SQL/column tree into a string containing every column
 // name referenced. Avoids JSON.stringify, which chokes on Drizzle's circular
@@ -417,6 +428,7 @@ describe("GET /orgs/visibility-score-runs (list)", () => {
     const where = vi.fn(() => ({ orderBy }));
     const from = vi.fn(() => ({ where }));
     vi.mocked(db.select).mockReturnValue({ from } as any);
+    mockReapNoop();
 
     const res = await request(createApp())
       .get("/orgs/visibility-score-runs")
@@ -429,6 +441,8 @@ describe("GET /orgs/visibility-score-runs (list)", () => {
     expect(res.body.runs).toHaveLength(1);
     expect(res.body.runs[0].brandId).toBe(BRAND_ID_1);
     expect(res.body.runs[0].visibility_score_delta).toBe("0.05");
+    // Reap-on-read: the list path flips stuck `running` rows before returning.
+    expect(db.update).toHaveBeenCalledTimes(1);
   });
 
   it("accepts campaignId filter and returns 200", async () => {
@@ -439,6 +453,7 @@ describe("GET /orgs/visibility-score-runs (list)", () => {
     const where = vi.fn(() => ({ orderBy }));
     const from = vi.fn(() => ({ where }));
     vi.mocked(db.select).mockReturnValue({ from } as any);
+    mockReapNoop();
 
     const res = await request(createApp())
       .get(`/orgs/visibility-score-runs?brandId=${BRAND_ID_1}&campaignId=${CAMPAIGN_ID}`)
@@ -467,6 +482,7 @@ describe("GET /orgs/visibility-score-runs (list)", () => {
     const where = vi.fn(() => ({ orderBy }));
     const from = vi.fn(() => ({ where }));
     vi.mocked(db.select).mockReturnValue({ from } as any);
+    mockReapNoop();
 
     const res = await request(createApp())
       .get(`/orgs/visibility-score-runs?brandId=${BRAND_ID_1}`)
