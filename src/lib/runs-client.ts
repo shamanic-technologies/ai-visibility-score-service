@@ -68,6 +68,18 @@ async function runsRequest<T>(
   return (await res.json()) as T;
 }
 
+/**
+ * Production-cost ledger (runs-service, doctrine COST-ACCOUNTING-1023): an AI visibility
+ * report is not a catalogue outcome (features-service GET /public/catalogue/steps), so
+ * every run this service opens is SUPPORT at creation, function `product_feature`. Its
+ * spend (and its chat/ahref children's) is reported apart, never left undeclared.
+ * Runs made before 2026-10-24 carry `retired_product` (service off the fleet since 2026-08).
+ */
+export const RUN_SUPPORT = {
+  kind: "product_feature",
+  reason: "AI visibility report: a product feature, not a catalogue outcome (no GTM pipe consumes it)",
+} as const;
+
 export async function createRun(
   taskName: string,
   identity: RunIdentity,
@@ -77,7 +89,7 @@ export async function createRun(
     "POST",
     "/v1/runs",
     identity,
-    { serviceName: SERVICE_NAME, taskName },
+    { serviceName: SERVICE_NAME, taskName, support: RUN_SUPPORT },
     forward,
   );
 }

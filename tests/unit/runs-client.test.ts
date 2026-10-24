@@ -30,6 +30,22 @@ describe("runs-client", () => {
     expect(body.taskName).toBe("visibility-score-run");
   });
 
+  it("every run is marked SUPPORT (product_feature) at creation: its spend never sits undeclared in the ledger", async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ id: "run-x" }),
+    });
+    const { createRun } = await import("../../src/lib/runs-client.js");
+    for (const task of ["visibility-score-run", "visibility-score-list", "visibility-score-get"]) {
+      await createRun(task, identity);
+    }
+    for (const call of (fetch as ReturnType<typeof vi.fn>).mock.calls) {
+      const body = JSON.parse(call[1].body);
+      expect(body.support.kind).toBe("product_feature");
+      expect(body.support.reason.length).toBeGreaterThan(0);
+    }
+  });
+
   it("updateRunStatus PATCHes /v1/runs/:id with status", async () => {
     (fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: true,
